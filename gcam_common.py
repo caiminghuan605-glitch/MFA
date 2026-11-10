@@ -31,7 +31,13 @@ REF_CAPACITY_CSV = (
     r"\发电装机容量.csv"
 )
 OUTPUT_DIR = r"C:\Users\22965\OneDrive\桌面\MFA\Output"
-OUTPUT_XLSX = os.path.join(OUTPUT_DIR, "GCAM_保有量与装机容量.xlsx")
+OUTPUT_XLSX = os.path.join(OUTPUT_DIR, "GCAM_保有量与九类装机容量_2010-2050.xlsx")
+
+# CCS 因子补充工作簿（六种 CCS 技术缺失因子时按 Scenario+region+subcetor+technology+year 补齐）
+CCS_MATCH_XLSX = (
+    r"C:\Users\22965\OneDrive\桌面\关键矿产\数据\GCAM\电力"
+    r"\GCAM_发电量_容量因子匹配_2010-2050.xlsx"
+)
 
 # --------------------------------------------------------------------------- #
 # 全局口径常量
