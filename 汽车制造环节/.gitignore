@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 中间产物与本地输出（成果在仓库外，不纳入版本控制）
+*.csv
+*.xlsx
+
+# 编辑器 / 系统
+.DS_Store
+Thumbs.db
