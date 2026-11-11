@@ -112,3 +112,28 @@ python build_and_verify.py     # 合成最终四表工作簿并全量核验
 | `97e5a21` | `convert_power.py` | 重写为 CF 表匹配 + 六 CCS 补充 + 九类归并 |
 | `11ac151` | `build_and_verify.py` | 改为四表输出并核验九类归并与取整一致性 |
 | （本次） | `README.md` | 更新九类装机流程、映射、核验与提交哈希 |
+
+## BEV/PHEV 技术占比处理参考文献
+
+本节内容引自《汽车技术占比处理方案》（`预备工作/output/新能源汽车BEV和PHEV占比情况/汽车技术占比处理方案.md`），
+记录 BEV/PHEV 技术占比处理及其用于 GCAM 数据库修正时所依据的参考文献。
+
+### 一、技术占比处理的主要参考文献（前三项）
+
+BEV 与 PHEV 技术占比处理采用 Logit 线性化的 Logistic 技术替代模型，其方法依据为：
+
+1. Fisher, J. C., & Pry, R. H. (1971). A simple substitution model of technological change. *Technological Forecasting and Social Change*, 3, 75–88. https://doi.org/10.1016/S0040-1625(71)80005-7
+2. Marchetti, C., & Nakicenovic, N. (1979). *The Dynamics of Energy Systems and the Logistic Substitution Model*. IIASA Research Report RR-79-13. International Institute for Applied Systems Analysis.
+3. Domarchi, C., & Cherchi, E. (2023). Electric vehicle forecasts: A review of models and methods including diffusion and substitution effects. *Transport Reviews*, 43(6), 1118–1143. https://doi.org/10.1080/01441647.2023.2195687
+
+其中，Fisher 与 Pry（1971）提出技术替代模型，Marchetti 与 Nakicenovic（1979）研究能源系统技术替代与 Logistic 模型，
+二者构成 Logit 技术替代模型的理论基础；Domarchi 与 Cherchi（2023）对新能源汽车预测模型进行系统综述，
+为技术扩散、技术替代及不同预测假设的处理提供方法参考。
+
+### 二、GCAM 数据库修正所依据的参考文献（第四项）
+
+4. International Energy Agency (IEA). (2026). *Global EV Outlook 2026*. Paris: IEA. https://www.iea.org/reports/global-ev-outlook-2026
+
+GCAM 原有交通技术分类包含 BEV 但缺少 PHEV 这一独立技术类别。本方案依据 IEA《Global EV Outlook 2026》所附
+BEV/PHEV 历史存量与未来情景预测数据，构建 BEV 与 PHEV 的存量结构比例，用于向 GCAM 数据库补充 PHEV 技术类别。
+该项仅作为 BEV/PHEV 存量数据来源，并非前三项技术占比处理方法论的共同来源。
