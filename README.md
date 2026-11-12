@@ -6,20 +6,23 @@
 
 - `gcam_common.py` — 共享工具与全局常量（只读读取、年份归一、半入取整、路径）
 - `convert_transport.py` — 新能源汽车服务量 → 车辆保有量
-- `convert_power.py` — 发电量(EJ) → 装机容量(MW)，并按九类归并
-- `build_and_verify.py` — 合成四表工作簿 + 全量核验 + 手算 + 一致性核对
+- `convert_power.py` — 发电量(EJ) → 装机容量(MW)，按 tech / Subtech 两级分类
+- `build_and_verify.py` — 更新最终双面板工作簿 + 全量核验
 - `README.md` — 本说明
 
-## GCAM 保有量与九类装机容量转换
+## GCAM 保有量与装机容量转换
 
 ### 运行命令
 
 使用本机自带 Python（`C:\Users\22965\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe`）：
 ```powershell
-python convert_transport.py    # 服务量→保有量，输出 Output/_transport_vehicle_stock.csv
-python convert_power.py        # 发电量→装机(明细+九类)，输出 _power_detail.csv / _power_categories.csv
-python build_and_verify.py     # 合成最终四表工作簿并全量核验
+python convert_transport.py    # 服务量→保有量（中间产物 Output/_transport_vehicle_stock.csv）
+python convert_power.py        # 发电量→装机明细+Subtech，输出 _power_detail.csv / _power_subtechs.csv
+python build_and_verify.py     # 更新最终双面板工作簿并全量核验
 ```
+
+`build_and_verify.py` 直接更新最终工作簿 `C:\Users\22965\OneDrive\桌面\MFA\Output\能源转型设备所有量.xlsx`：
+保留其中的 `车辆保有量_面板`，只替换 `装机容量_九类_面板`。运行前请先备份该文件；脚本不会重建车辆面板。
 
 ### 输入与年份规则
 
@@ -61,42 +64,58 @@ python build_and_verify.py     # 合成最终四表工作簿并全量核验
 - CIPG：按 `technology + Year` 关联，保留 `t/GW` 系数与匹配状态；缺年留空、装机仍按有效 CF 计算。
 - 状态：数值 0 发电量 → 装机记 0 并记录因子匹配状态；正发电量遇缺失/无效/冲突因子 → 装机留空+登记；空白发电量 → 单独标记。
 
-### 九类归并
+### 电力分类：tech / Subtech
 
-执行顺序固定：**匹配原始技术 CF → 分别计算未取整装机 → 按九类加总 → 对类别合计四舍五入**。
+原始 `technology` 名称保持不变，继续用于匹配 CF / CIPG。分类字段只用于结果汇总与面板输出：
 
-| 归并类别 | 原始技术 |
-| --- | --- |
-| `biomass_CCS` | `biomass (IGCC CCS)`、`biomass (conv CCS)` |
-| `coal_CCS` | `coal (IGCC CCS)`、`coal (conv pul CCS)` |
-| `gas_CCS` | `gas (CC CCS)` |
-| `hydro` | `hydro` |
-| `nuclear` | `Gen_III`、`Gen_II_LWR` |
-| `refined liquids_CCS` | `refined liquids (CC CCS)` |
-| `PV` | `rooftop_pv`、`PV`、`PV_storage` |
-| `wind` | `wind`、`wind_storage` |
-| `wind_offshore` | `wind_offshore` |
+| 原始 technology | tech | Subtech |
+| --- | --- | --- |
+| `biomass (IGCC CCS)` | `biomass_CCS` | `biomass_IGCC_CCS` |
+| `biomass (conv CCS)` | `biomass_CCS` | `biomass_conv_CCS` |
+| `coal (IGCC CCS)` | `coal_CCS` | `coal_IGCC_CCS` |
+| `coal (conv pul CCS)` | `coal_CCS` | `coal_conv_pul_CCS` |
+| `gas (CC CCS)` | `gas_CCS` | `gas_CC_CCS` |
+| `refined liquids (CC CCS)` | `refined liquids_CCS` | `refined liquids_CC_CCS` |
+| `hydro` | `hydro` | `hydro` |
+| `Gen_III`、`Gen_II_LWR` | `nuclear` | `nuclear` |
+| `rooftop_pv`、`PV`、`PV_storage` | `PV` | `PV` |
+| `wind`、`wind_storage` | `wind` | `wind` |
+| `wind_offshore` | `wind` | `wind_offshore` |
 
-- 归并键：`Scenario + region + year + 归并类别`。
-- 类别内有源记录装机无法计算 → 类别合计留空并注明缺项；某情景/地区/年份下完全无某类源记录 → 保留该类别并标记「源表无记录」；映射表之外的技术登记为异常。
+- 共 **8 类 tech、11 类 Subtech**；每个 Subtech 只对应一个 tech。
+- 执行顺序固定：**匹配原始技术 CF → 分别计算未取整装机 → 按 `Scenario+region+Year+tech+Subtech` 加总 → 对 Subtech 合计四舍五入**。
+- `biomass`、`coal` 的不同 Subtech 分别保存，不再先合计成一个 `biomass_CCS` / `coal_CCS` 再拆分。
+- `wind` 与 `wind_offshore` 同属 `tech=wind`，但作为两个 Subtech 分别保存。
+- 主面板不输出 tech 合计行；`tech` 只作为两级分类标签。
+- 某 Scenario-region 下若某 Subtech 全部年份均无源记录，则该 Subtech 不出行；任一年有记录即保留整行，缺年留空。该口径与旧面板“源表无记录则不出行”一致。
 
 ### 取整规则
 
 中间值保留全精度，仅最终结果按**传统四舍五入**取整（`.5` 向上，`floor(x+0.5)`）：
-`0.5→1、1.5→2、2.5→3、2.4→2、2.6→3`。九类合计先汇总未取整值再取整。
+`0.5→1、1.5→2、2.5→3、2.4→2、2.6→3`。先汇总未取整值，再对每个 Subtech 取整。
+
+`biomass_CCS` / `coal_CCS` 由“旧类别合计后取整”改为“各 Subtech 分别取整”，
+整数合计可能出现 ±1 差异；这是原取整规则的正常结果，未人为调整。
 
 ### 输出与核验
 
-成果工作簿：`C:\Users\22965\OneDrive\桌面\MFA\Output\GCAM_保有量与九类装机容量_2010-2050.xlsx`（Git 仓库外）
+最终成果工作簿：`C:\Users\22965\OneDrive\桌面\MFA\Output\能源转型设备所有量.xlsx`
 
-- 四个工作表：`车辆保有量`、`装机换算明细`、`装机容量_九类`、`异常与核验`
-- SHA-256：`9ed7b96eca1fd871523896f1c4b66312888e48cf9e1231e200ed59bcdc5131d5`
-- 核验摘要：
-  - 车辆保有量 5670 行；装机换算明细 10800 行（1200 源记录 × 9 年）；装机容量_九类 7776 行（864 情景-地区-年份 × 9 类）
-  - 交通年份含 2010/2020/2050、电力年份含 2010/2021/2050，三张结果表均无范围外记录，匹配键无重复，九类映射无未覆盖技术
-  - 补充因子使用记录数 **3348**（六种 CCS）；异常 **0**（所有原始技术均匹配到有效 CF）
-  - 手算（不同 CF 合并项）：`rooftop_pv(CF 0.2400)+PV(CF 0.2824)+PV_storage(CF 0.2824) = 20.9001 → 21 MW`
-  - 取整前一致核对：原始技术装机合计与九类装机合计一致 6552 / 不一致 0
+- 两张工作表：
+  - `车辆保有量_面板` — 原样保留：`Scenario`、`Region`、`Subsector`、`Technology`、`单位`、2010–2050（含 2020）；内容、顺序、数值均不变。
+  - `装机容量_九类_面板` — **历史表名保留**，实际包含 8 类 tech、11 类 Subtech；列为
+    `Scenario`、`region`、`tech`、`Subtech`、`单位`、2010、2015、2021、2025、2030、2035、2040、2045、2050；
+    单位保持 `MW`，电力年份保留 2021（不改为车辆的 2020）。
+- 本次实际运行核验（修改前基线见 Output 下 `_baseline_*` 文件）：
+  - 车辆保有量面板 1260 行；与修改前备份逐单元格比对差异 **0**（含表头、行顺序、数值）。
+  - 装机换算明细 10800 行（1200 源记录 × 9 年）；原始技术的发电量、CF、未取整装机逐键比对差异 **0**。
+  - Subtech 聚合 9504 行；最终电力面板 852 行（62 个有 CCS 的 Scenario-region × 11 + 34 个无 CCS 的 Scenario-region × 5）。
+  - 面板主键 `Scenario+region+tech+Subtech` 重复 **0**；tech 8 类、Subtech 11 类；Subtech→tech 唯一映射通过。
+  - 补充因子使用记录数 **3348**（六种 CCS）；异常 **0**（所有原始技术均匹配到有效 CF）。
+  - 未取整汇总：`gas_CCS`、`hydro`、`nuclear`、`refined liquids_CCS`、`PV`、`wind`、`wind_offshore` 与旧分类逐组一致；
+    `biomass_CCS`、`coal_CCS` 的旧类别未取整合计与对应两个 Subtech 之和逐组一致；旧 `wind + wind_offshore` 未取整合计与新 `tech=wind` 两个 Subtech 之和逐组一致（差异均为 0）。
+  - 取整结果：1:1 映射类别整数差异 **0**；`biomass_CCS` 分别取整差异 59 组、`coal_CCS` 78 组，最大绝对差 **1**，属分别取整的正常差异。
+- 下游兼容性提示：`制造铜需求\copper_demand.py` 仍按旧列名 `归并类别` 读取本面板；本次改为 `tech` / `Subtech` 后，该程序需同步调整列名与分类口径后才能继续运行。本任务未修改该下游程序。
 
 ### 提交记录（按时间顺序）
 
@@ -111,7 +130,13 @@ python build_and_verify.py     # 合成最终四表工作簿并全量核验
 | `283198a` | `gcam_common.py` | 新增九类装机输出名与 CCS 补充工作簿路径 |
 | `97e5a21` | `convert_power.py` | 重写为 CF 表匹配 + 六 CCS 补充 + 九类归并 |
 | `11ac151` | `build_and_verify.py` | 改为四表输出并核验九类归并与取整一致性 |
-| （本次） | `README.md` | 更新九类装机流程、映射、核验与提交哈希 |
+| `408840a` | `README.md` | 更新九类装机流程、映射、核验与提交哈希 |
+| `e91dc5b` | `README.md` | 追加 BEV/PHEV 技术占比处理参考文献（前四项） |
+| `845c71f` | `split_nev_stock_bev_phev.py` | 新增 BEV/PHEV 拆分脚本（保留小数精度不取整） |
+| `927bb6a` | `gcam_common.py` | 新增最终双面板工作簿路径与电力面板年份常量 |
+| `34059dc` | `convert_power.py` | 按 tech/Subtech 两级分类重算装机（wind 合并、biomass/coal 细分） |
+| `bb0bb59` | `build_and_verify.py` | 补齐最终双面板导出，保留车辆面板并核验 tech/Subtech |
+| （本次） | `README.md` | 更新分类映射、最终面板结构、核验结果与下游兼容性说明 |
 
 ## BEV/PHEV 技术占比处理参考文献
 
