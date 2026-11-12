@@ -33,6 +33,13 @@ REF_CAPACITY_CSV = (
 OUTPUT_DIR = r"C:\Users\22965\OneDrive\桌面\MFA\Output"
 OUTPUT_XLSX = os.path.join(OUTPUT_DIR, "GCAM_保有量与九类装机容量_2010-2050.xlsx")
 
+# 最终交付的双面板工作簿（车辆面板原样保留，电力面板按 tech/Subtech 重分类）
+FINAL_XLSX = os.path.join(OUTPUT_DIR, "能源转型设备所有量.xlsx")
+VEHICLE_PANEL_SHEET = "车辆保有量_面板"
+POWER_PANEL_SHEET = "装机容量_九类_面板"
+# 电力面板沿用原年份集合与顺序（保留 2021，不改为车辆的 2020）
+POWER_PANEL_YEARS = [2010, 2015, 2021, 2025, 2030, 2035, 2040, 2045, 2050]
+
 # CCS 因子补充工作簿（六种 CCS 技术缺失因子时按 Scenario+region+subcetor+technology+year 补齐）
 CCS_MATCH_XLSX = (
     r"C:\Users\22965\OneDrive\桌面\关键矿产\数据\GCAM\电力"
