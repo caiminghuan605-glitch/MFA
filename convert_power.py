@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""发电量（EJ）→ 估算装机容量（MW）转换，并按九类归并。
+"""发电量（EJ）→ 估算装机容量（MW）转换，并按 tech / Subtech 两级分类。
 
 读取 数据.xlsx 的：
   - power generation（发电量，宽表，整数年份列，Scenario/region/subcetor/technology/units）
@@ -13,7 +13,14 @@
 - 水电直接使用主表 CF 中匹配到的 hydro 因子。
 
 公式：装机(MW) = 年发电量(EJ) × 10^9 ÷ (3.6 × 8760 × CF)，CF 用 0<CF≤1 小数。
-每个原始技术记录计算未取整 MW；再按 Scenario+region+year+归并类别 加总，最后对类别合计四舍五入。
+每个原始技术记录计算未取整 MW；再按 Scenario+region+Year+tech+Subtech 加总，
+最后对 Subtech 合计四舍五入。tech 只作两级标签，不生成 tech 合计行。
+
+分类口径（本次修正）：
+- tech 为旧归并分类，但 wind、wind_offshore 统一归入 wind；
+- Subtech 为修正后的细分：biomass/coal 的 IGCC 与 conv 分别保存，
+  wind 与 wind_offshore 虽同属 tech=wind，也分别保存。
+- 原始 technology 名称保持不变，继续用于匹配 CF / CIPG。
 """
 import csv
 import os
@@ -29,7 +36,7 @@ CIPG_SHEET = "CIPG"
 CCS_MATCH_SHEET = "匹配明细"
 
 MID_DETAIL_CSV = os.path.join(g.OUTPUT_DIR, "_power_detail.csv")
-MID_CATEGORY_CSV = os.path.join(g.OUTPUT_DIR, "_power_categories.csv")
+MID_SUBTECH_CSV = os.path.join(g.OUTPUT_DIR, "_power_subtechs.csv")
 
 # 六种需要从补充工作簿补齐因子的 CCS 技术
 CCS_TECHS = [
@@ -38,29 +45,40 @@ CCS_TECHS = [
     "gas (CC CCS)", "refined liquids (CC CCS)",
 ]
 
-# 九类归并映射：原始技术 -> 归并类别
-CATEGORY_MAP = {
-    "biomass (IGCC CCS)": "biomass_CCS",
-    "biomass (conv CCS)": "biomass_CCS",
-    "coal (IGCC CCS)": "coal_CCS",
-    "coal (conv pul CCS)": "coal_CCS",
-    "gas (CC CCS)": "gas_CCS",
-    "hydro": "hydro",
-    "Gen_III": "nuclear",
-    "Gen_II_LWR": "nuclear",
-    "refined liquids (CC CCS)": "refined liquids_CCS",
-    "rooftop_pv": "PV",
-    "PV": "PV",
-    "PV_storage": "PV",
-    "wind": "wind",
-    "wind_storage": "wind",
-    "wind_offshore": "wind_offshore",
+# 原始技术 -> (tech, Subtech)。字段大小写严格按任务口径。
+TECH_MAP = {
+    "biomass (IGCC CCS)": ("biomass_CCS", "biomass_IGCC_CCS"),
+    "biomass (conv CCS)": ("biomass_CCS", "biomass_conv_CCS"),
+    "coal (IGCC CCS)": ("coal_CCS", "coal_IGCC_CCS"),
+    "coal (conv pul CCS)": ("coal_CCS", "coal_conv_pul_CCS"),
+    "gas (CC CCS)": ("gas_CCS", "gas_CC_CCS"),
+    "refined liquids (CC CCS)": ("refined liquids_CCS", "refined liquids_CC_CCS"),
+    "hydro": ("hydro", "hydro"),
+    "Gen_III": ("nuclear", "nuclear"),
+    "Gen_II_LWR": ("nuclear", "nuclear"),
+    "rooftop_pv": ("PV", "PV"),
+    "PV": ("PV", "PV"),
+    "PV_storage": ("PV", "PV"),
+    "wind": ("wind", "wind"),
+    "wind_storage": ("wind", "wind"),
+    "wind_offshore": ("wind", "wind_offshore"),
 }
 
-CATEGORY_ORDER = [
+# 八类 tech
+TECH_ORDER = [
     "biomass_CCS", "coal_CCS", "gas_CCS", "hydro", "nuclear",
-    "refined liquids_CCS", "PV", "wind", "wind_offshore",
+    "refined liquids_CCS", "PV", "wind",
 ]
+
+# 十一类 Subtech（聚合与面板输出的固定顺序）
+SUBTECH_ORDER = [
+    "biomass_IGCC_CCS", "biomass_conv_CCS",
+    "coal_IGCC_CCS", "coal_conv_pul_CCS",
+    "gas_CC_CCS", "refined liquids_CC_CCS",
+    "hydro", "nuclear", "PV", "wind", "wind_offshore",
+]
+
+SUBTECH_TO_TECH = {sub: tech for tech, sub in TECH_MAP.values()}
 
 # 装机换算明细列（长表）
 RESULT_FIELDS = [
@@ -69,11 +87,11 @@ RESULT_FIELDS = [
     "CapacityFactor", "CF_Source", "CF_MatchStatus", "AnnualHours",
     "InstalledCapacity_MW_unrounded",
     "CIPG_t_per_GW", "CIPG_Unit", "CIPG_Status",
-    "Category", "Status",
+    "tech", "Subtech", "Status",
 ]
-# 装机容量_九类列
-CATEGORY_FIELDS = [
-    "Scenario", "region", "Year", "Category",
+# 十一类 Subtech 聚合列
+SUBTECH_FIELDS = [
+    "Scenario", "region", "Year", "tech", "Subtech",
     "InstalledCapacity_MW", "Status",
 ]
 ANOMALY_FIELDS = [
@@ -211,7 +229,7 @@ def match_cf(technology, scenario, region, subcetor, year, cf_sheet, ccs_data, c
 
 
 def compute():
-    """执行电力转换，返回 (detail, categories, anomalies)。"""
+    """执行电力转换，返回 (detail, subtechs, anomalies)。"""
     wb = g.read_workbook_safe(g.DATA_XLSX)
     power_records = load_power(wb)
     cf_sheet = load_cf_sheet(wb)
@@ -234,13 +252,13 @@ def compute():
             technology, scenario, region, subcetor, year,
             cf_sheet, ccs_data, ccs_conflicts)
 
-        category = CATEGORY_MAP.get(technology)
-        if category is None:
+        tech, subtech = TECH_MAP.get(technology, (None, None))
+        if tech is None:
             anomalies.append({
                 "Table": POWER_SHEET, "Scenario": scenario, "region": region,
                 "subcetor": subcetor, "technology": technology, "Year": year,
                 "Type": "unmapped_technology",
-                "Detail": "技术不在九类映射表中",
+                "Detail": "技术不在 tech/Subtech 映射表中",
             })
 
         cipg_year = cipg_data.get(technology, {})
@@ -256,7 +274,7 @@ def compute():
             "InstalledCapacity_MW_unrounded": None,
             "CIPG_t_per_GW": cipg, "CIPG_Unit": cipg_unit,
             "CIPG_Status": cipg_status,
-            "Category": category, "Status": None,
+            "tech": tech, "Subtech": subtech, "Status": None,
         }
 
         if gen is None:
@@ -311,17 +329,21 @@ def compute():
         row["Status"] = "ok"
         detail.append(row)
 
-    categories = aggregate(detail)
-    return detail, categories, anomalies
+    subtechs = aggregate(detail)
+    return detail, subtechs, anomalies
 
 
 def aggregate(detail):
-    """将未取整装机按 Scenario+region+year+归并类别 加总，最后取整。"""
+    """按 Scenario+region+Year+tech+Subtech 汇总未取整装机，最后对 Subtech 取整。
+
+    汇总键包含 tech 与 Subtech；因每个 Subtech 只对应一个 tech，
+    该键与 Scenario+region+Year+Subtech 等价，且不产生 tech 合计行。
+    """
     # 确定 (scenario, region, year) 全域
     universe = sorted({(r["Scenario"], r["region"], r["Year"]) for r in detail})
     groups = defaultdict(lambda: {"sum": 0.0, "has_none": False, "has_record": False})
     for r in detail:
-        key = (r["Scenario"], r["region"], r["Year"], r["Category"])
+        key = (r["Scenario"], r["region"], r["Year"], r["tech"], r["Subtech"])
         groups[key]["has_record"] = True
         mw = r["InstalledCapacity_MW_unrounded"]
         if mw is None:
@@ -329,46 +351,49 @@ def aggregate(detail):
         else:
             groups[key]["sum"] += mw
 
-    cats = []
+    rows = []
     for scenario, region, year in universe:
-        for cat in CATEGORY_ORDER:
-            key = (scenario, region, year, cat)
+        for subtech in SUBTECH_ORDER:
+            tech = SUBTECH_TO_TECH[subtech]
+            key = (scenario, region, year, tech, subtech)
             grp = groups.get(key)
             if grp is None or not grp["has_record"]:
-                cats.append({
+                rows.append({
                     "Scenario": scenario, "region": region, "Year": year,
-                    "Category": cat, "InstalledCapacity_MW": None,
+                    "tech": tech, "Subtech": subtech,
+                    "InstalledCapacity_MW": None,
                     "Status": "源表无记录",
                 })
             elif grp["has_none"]:
-                cats.append({
+                rows.append({
                     "Scenario": scenario, "region": region, "Year": year,
-                    "Category": cat, "InstalledCapacity_MW": None,
+                    "tech": tech, "Subtech": subtech,
+                    "InstalledCapacity_MW": None,
                     "Status": "缺项（部分源记录无法计算）",
                 })
             else:
-                cats.append({
+                rows.append({
                     "Scenario": scenario, "region": region, "Year": year,
-                    "Category": cat,
+                    "tech": tech, "Subtech": subtech,
                     "InstalledCapacity_MW": g.round_half_up(grp["sum"]),
                     "Status": "ok",
                 })
-    return cats
+    return rows
 
 
-def summary(detail, categories, anomalies):
+def summary(detail, subtechs, anomalies):
     by_status = Counter(r["Status"] for r in detail)
     years = sorted({r["Year"] for r in detail})
     scenarios = sorted({r["Scenario"] for r in detail})
     n_supplement = sum(1 for r in detail if r["CF_Source"] and r["CF_Source"].startswith("匹配明细"))
-    cat_status = Counter(c["Status"] for c in categories)
+    sub_status = Counter(c["Status"] for c in subtechs)
     return {
         "detail_rows": len(detail),
-        "category_rows": len(categories),
+        "subtech_rows": len(subtechs),
         "years": years,
         "scenarios": scenarios,
         "detail_status": dict(by_status),
-        "category_status": dict(cat_status),
+        "subtech_status": dict(sub_status),
         "anomalies": len(anomalies),
         "n_supplement": n_supplement,
     }
@@ -376,25 +401,25 @@ def summary(detail, categories, anomalies):
 
 def main():
     g.ensure_dir(g.OUTPUT_DIR)
-    detail, categories, anomalies = compute()
+    detail, subtechs, anomalies = compute()
     with open(MID_DETAIL_CSV, "w", newline="", encoding="utf-8-sig") as f:
         w = csv.DictWriter(f, fieldnames=RESULT_FIELDS)
         w.writeheader()
         for r in detail:
             w.writerow(r)
-    with open(MID_CATEGORY_CSV, "w", newline="", encoding="utf-8-sig") as f:
-        w = csv.DictWriter(f, fieldnames=CATEGORY_FIELDS)
+    with open(MID_SUBTECH_CSV, "w", newline="", encoding="utf-8-sig") as f:
+        w = csv.DictWriter(f, fieldnames=SUBTECH_FIELDS)
         w.writeheader()
-        for r in categories:
+        for r in subtechs:
             w.writerow(r)
-    s = summary(detail, categories, anomalies)
+    s = summary(detail, subtechs, anomalies)
     print("=== 电力转换核验摘要 ===")
     print("换算明细行数:", s["detail_rows"])
-    print("九类装机行数:", s["category_rows"])
+    print("十一类 Subtech 行数:", s["subtech_rows"])
     print("实际年份:", s["years"])
     print("情景数:", len(s["scenarios"]), s["scenarios"])
     print("明细状态:", s["detail_status"])
-    print("九类状态:", s["category_status"])
+    print("Subtech 状态:", s["subtech_status"])
     print("异常数:", s["anomalies"])
     print("补充因子使用记录数:", s["n_supplement"])
 
