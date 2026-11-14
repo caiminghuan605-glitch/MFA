@@ -37,8 +37,10 @@ OUTPUT_XLSX = os.path.join(OUTPUT_DIR, "GCAM_保有量与九类装机容量_2010
 FINAL_XLSX = os.path.join(OUTPUT_DIR, "能源转型设备所有量.xlsx")
 VEHICLE_PANEL_SHEET = "车辆保有量_面板"
 POWER_PANEL_SHEET = "装机容量_九类_面板"
-# 电力面板沿用原年份集合与顺序（保留 2021，不改为车辆的 2020）
-POWER_PANEL_YEARS = [2010, 2015, 2021, 2025, 2030, 2035, 2040, 2045, 2050]
+# 车辆面板年份：1990、2005 为本次新增的历史年份，其余沿用原面板
+VEHICLE_PANEL_YEARS = [1990, 2005, 2010, 2015, 2020, 2025, 2030, 2035, 2040, 2045, 2050]
+# 电力面板年份：沿用原年份集合与顺序（保留 2021，不改为车辆的 2020），并前移 1990、2005
+POWER_PANEL_YEARS = [1990, 2005, 2010, 2015, 2021, 2025, 2030, 2035, 2040, 2045, 2050]
 
 # CCS 因子补充工作簿（六种 CCS 技术缺失因子时按 Scenario+region+subcetor+technology+year 补齐）
 CCS_MATCH_XLSX = (
@@ -49,7 +51,7 @@ CCS_MATCH_XLSX = (
 # --------------------------------------------------------------------------- #
 # 全局口径常量
 # --------------------------------------------------------------------------- #
-YEAR_MIN = 2010          # 起始年（含）
+YEAR_MIN = 1990          # 起始年（含）
 YEAR_MAX = 2050          # 结束年（含）
 BASE_YEAR = 2021         # GCAM 基准年
 HOURS_PER_YEAR = 8760    # 年度换算小时数（EIA 容量因子定义口径）
@@ -208,7 +210,11 @@ def read_workbook_safe(path):
             tempfile.gettempdir(),
             os.path.basename(path) + ".shared_read_only.xlsx",
         )
-        _copy_shared_read_only(path, tmp)
+        try:
+            _copy_shared_read_only(path, tmp)
+        except PermissionError:
+            # Excel 独占占用时共享模式仍可能失败；普通复制在实测中可用
+            shutil.copy2(path, tmp)
         return openpyxl.load_workbook(tmp, read_only=True, data_only=True)
 
 

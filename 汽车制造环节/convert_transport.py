@@ -6,7 +6,7 @@
   - annual travel per vehicle（单车年行驶里程 VKT，宽表，VKT_YYYY 列）
   - All factor（平均载运系数，宽表，文本年份列）
 
-统一年份字段并筛选 2010–2050（含首尾，保留区间内实际存在的 GCAM 模型年份，
+统一年份字段并筛选 1990–2050（含首尾，保留区间内实际存在的 GCAM 模型年份，
 交通表保留 2020），按 Region+Sector+Subsector+Technology+Year 精确匹配因子，
 按公式计算车辆保有量（辆）。
 
