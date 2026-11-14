@@ -7,8 +7,10 @@
   - CIPG（单位装机材料强度，technology × 年份，t/GW）
 以及补充工作簿 GCAM_发电量_容量因子匹配_2010-2050.xlsx 的 匹配明细（六种 CCS 因子）。
 
-统一年份字段并筛选 2010–2050（含首尾，电力表保留 2021）。
+统一年份字段并筛选 1990–2050（含首尾，电力表保留 2021）。
 - 按 region+subcetor+technology+year 匹配主表 CF（保留发电表 Scenario）；
+- 2010 年前的 1990、2005 年，主表 CF 无对应列，改从
+  `电力部门_容量因子.xlsx` 的 `全部` 长表按同一来源文件补齐（见 load_cf_history）；
 - 仅对主表缺失的六种 CCS 技术，按 Scenario+region+subcetor+technology+year 从 匹配明细 补齐；
 - 水电直接使用主表 CF 中匹配到的 hydro 因子。
 
@@ -23,6 +25,7 @@
 - 原始 technology 名称保持不变，继续用于匹配 CF / CIPG。
 """
 import csv
+import math
 import os
 import sys
 from collections import defaultdict, Counter
@@ -34,6 +37,10 @@ POWER_SHEET = "power generation"
 CF_SHEET = "CF"
 CIPG_SHEET = "CIPG"
 CCS_MATCH_SHEET = "匹配明细"
+CF_HISTORY_SHEET = "全部"
+CF_HISTORY_SOURCE = "CF表(历史长表)"
+# 主表 CF 从 2010 开始；更早的年份从长表补齐
+CF_HISTORY_YEARS = tuple(y for y in g.POWER_PANEL_YEARS if y < 2010)
 
 MID_DETAIL_CSV = os.path.join(g.OUTPUT_DIR, "_power_detail.csv")
 MID_SUBTECH_CSV = os.path.join(g.OUTPUT_DIR, "_power_subtechs.csv")
@@ -152,6 +159,89 @@ def load_cf_sheet(wb):
     return data
 
 
+def _hist_value(all_vals, key, year, files):
+    """从长表中取某键某年的唯一 CF；同键多来源多值则不猜。"""
+    data = all_vals.get((key, year), {})
+    if files is None:
+        values = {v for v in data.values() if v is not None}
+    else:
+        values = {data[f] for f in files if f in data and data[f] is not None}
+    if len(values) == 1:
+        return next(iter(values))
+    return None
+
+
+def load_cf_history(cf_sheet):
+    """从 电力部门_容量因子.xlsx 的 全部 长表补齐 2010 年前的 CF。
+
+    主表 CF 从 2010 开始，1990/2005 没有列。长表若只按
+    region+subcetor+technology+year 直接取，会因同一键存在多个来源文件而冲突。
+    因此先用主表 2010–2050 的数值反推每个键对应的来源文件（要求该文件在
+    主表全部年份都与主表一致），再用同一文件取 1990/2005 值；地区级缺失时
+    退回全局（region=None）同技术。仅补齐 g.POWER_PANEL_YEARS 中小于 2010
+    的年份，不覆盖主表已有值，不插值、不填零。
+    """
+    if not CF_HISTORY_YEARS:
+        return {}
+    wide_years = sorted({y for vals in cf_sheet.values() for y in vals})
+    wb = g.read_workbook_safe(g.CF_XLSX)
+    ws = wb[CF_HISTORY_SHEET]
+    rows = ws.iter_rows(values_only=True)
+    header = next(rows)
+    idx = {}
+    for n in ["file", "region", "sector", "subsector", "technology",
+              "year", "capacity_factor"]:
+        idx[n] = _header_index(header, n)
+
+    wanted = set(wide_years) | set(CF_HISTORY_YEARS)
+    all_vals = defaultdict(dict)
+    for r in rows:
+        if r is None or r[idx["year"]] is None:
+            continue
+        y = r[idx["year"]]
+        if y not in wanted:
+            continue
+        region = r[idx["region"]]
+        if isinstance(region, str) and not region.strip():
+            region = None
+        key = (region, r[idx["subsector"]], r[idx["technology"]])
+        cf = g.to_number(r[idx["capacity_factor"]])
+        if cf is not None:
+            all_vals[(key, y)][r[idx["file"]]] = cf
+    wb.close()
+
+    history = {}
+    for key, vals in cf_sheet.items():
+        # 候选来源文件：在任一主表年份出现过
+        candidates = set()
+        for y in wide_years:
+            candidates |= set(all_vals.get((key, y), {}))
+        # 保留在主表全部年份都与主表值一致的来源文件
+        good = []
+        for f in candidates:
+            ok = True
+            for y in wide_years:
+                wv = vals.get(y)
+                if wv is None:
+                    continue
+                fv = all_vals.get((key, y), {}).get(f)
+                if fv is None or not math.isclose(
+                        fv, wv, rel_tol=1e-12, abs_tol=1e-12):
+                    ok = False
+                    break
+            if ok:
+                good.append(f)
+
+        for hy in CF_HISTORY_YEARS:
+            v = _hist_value(all_vals, key, hy, good)
+            if v is None:
+                # 全局技术（region=None），如核电 Gen_II_LWR
+                v = _hist_value(all_vals, (None, key[1], key[2]), hy, None)
+            if v is not None:
+                history[(key[0], key[1], key[2], hy)] = v
+    return history
+
+
 def load_ccs_supplement(path):
     """读取补充工作簿 匹配明细，仅取六种 CCS 技术的 CF。
 
@@ -210,7 +300,8 @@ def load_cipg(wb):
     return data, unit_val or "t/GW"
 
 
-def match_cf(technology, scenario, region, subcetor, year, cf_sheet, ccs_data, ccs_conflicts):
+def match_cf(technology, scenario, region, subcetor, year,
+             cf_sheet, cf_history, ccs_data, ccs_conflicts):
     """返回 (cf, cf_source, cf_match_status, conflict_flag)。"""
     if technology in CCS_TECHS:
         key = (scenario, region, subcetor, technology, year)
@@ -223,6 +314,11 @@ def match_cf(technology, scenario, region, subcetor, year, cf_sheet, ccs_data, c
 
     cf_year = cf_sheet.get((region, subcetor, technology), {})
     cf = cf_year.get(year)
+    if cf is None and year in CF_HISTORY_YEARS:
+        cf = cf_history.get((region, subcetor, technology, year))
+        if cf is not None:
+            return cf, CF_HISTORY_SOURCE, "历史匹配", False
+        return None, CF_HISTORY_SOURCE, "缺失", False
     if cf is None:
         return None, "CF表", "缺失", False
     return cf, "CF表(主表)", "主表匹配", False
@@ -236,6 +332,7 @@ def compute():
     cipg_data, cipg_unit = load_cipg(wb)
     wb.close()
 
+    cf_history = load_cf_history(cf_sheet)
     ccs_data, ccs_conflicts = load_ccs_supplement(g.CCS_MATCH_XLSX)
 
     detail = []
@@ -250,7 +347,7 @@ def compute():
 
         cf, cf_src, cf_status, cf_conflict = match_cf(
             technology, scenario, region, subcetor, year,
-            cf_sheet, ccs_data, ccs_conflicts)
+            cf_sheet, cf_history, ccs_data, ccs_conflicts)
 
         tech, subtech = TECH_MAP.get(technology, (None, None))
         if tech is None:
