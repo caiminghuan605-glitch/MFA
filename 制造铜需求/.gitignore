@@ -1,9 +1,0 @@
-__pycache__/
-*.py[cod]
-*.tmp
-*.tmp.xlsx
-~$*
-.~lock*
-
-# 生成成果：正式输出去 MFA/Output，项目仓库不保存副本
-成果/
