@@ -3,13 +3,16 @@
 
 方案依据：PROMPT_给DeepSeek_铜需求量.md
 2026-11-12 用户确认：
-  - 2010、2015 年使用 2021 年 CIPG 系数；2025 年使用 2030 年 CIPG 系数；
+  - 2025 年使用 2030 年 CIPG 系数；
   - 尽量保留源表原写法（tech / Subtech / Scenario / Region 等不翻译、不归一）。
+2026-11-14 用户确认：
+  - 输入新增 1990、2005 等年份；数据年份没有对应 CIPG 系数时，
+    使用最老可用年份（当前 2021）的系数。
 
 输入（只读，不得写入）：
   1) 数量/容量：C:\\Users\\22965\\OneDrive\\桌面\\MFA\\Output\\能源转型设备所有量.xlsx
-     - 车辆保有量_面板：Scenario, Region, Subsector, Technology, 单位, 2010..2050
-     - 装机容量_九类_面板：Scenario, region, tech, Subtech, 单位, 2010..2050
+     - 车辆保有量_面板：Scenario, Region, Subsector, Technology, 单位, 1990..2050
+     - 装机容量_九类_面板：Scenario, region, tech, Subtech, 单位, 1990..2050
   2) 制造需铜系数：C:\\Users\\22965\\OneDrive\\桌面\\关键矿产\\数据\\数据.xlsx
      - CIPG：technology x 年份，单位 t/GW
      - Automotive copper demand：categories x BEV/PHEV，单位 kg/vehicle
@@ -104,8 +107,31 @@ TECH_SUBTECH_MAP = {
     "wind": ["wind", "wind_offshore"],
 }
 
-# 用户确认的年份系数映射：2010/2015 用 2021 年系数，2025 用 2030 年系数。
-POWER_COEF_YEAR = {2010: 2021, 2015: 2021, 2025: 2030}
+# 用户确认的年份系数特殊映射：2025 年使用 2030 年系数。
+# 其他数据年份若在 CIPG 中没有对应年份，则使用最老可用年份（当前为 2021）。
+SPECIAL_COEF_YEAR = {2025: 2030}
+
+
+def resolve_coef_year(year, cipg_years):
+    """返回某数据年份实际使用的 CIPG 年份。
+
+    - 2025 按已确认口径使用 2030；
+    - 有对应年份则用当年；
+    - 早于最老 CIPG 年份（以及中间无对应年份）用最老可用年份；
+    - 晚于最新 CIPG 年份用最新年份（当前数据不会出现）。
+    """
+    available = sorted(cipg_years)
+    if not available:
+        raise ValueError("CIPG 没有可用年份")
+    if year in SPECIAL_COEF_YEAR:
+        return SPECIAL_COEF_YEAR[year]
+    if year in available:
+        return year
+    if year < available[0]:
+        return available[0]
+    if year > available[-1]:
+        return available[-1]
+    return available[0]
 
 
 # ---------------------------------------------------------------------------
@@ -408,14 +434,15 @@ POWER_DETAIL_FIELDS = [
 ]
 
 
-def select_power_coefficient(subtech, year, cipg):
+def select_power_coefficient(subtech, year, cipg, cipg_years):
     """按 Subtech 精确取 CIPG 系数。
 
     返回 (系数, CIPG技术, 匹配状态, 系数年份, 备注)。
-    - 2010/2015 用 2021 年系数，2025 用 2030 年系数（用户确认口径）。
+    - 有对应年份用当年；无对应年份用最老可用年份（当前 2021）。
+    - 2025 按已确认口径使用 2030。
     - 每个 Subtech 只对应一个 CIPG technology，不存在成员系数选择问题。
     """
-    coef_year = POWER_COEF_YEAR.get(year, year)
+    coef_year = resolve_coef_year(year, cipg_years)
     cipg_tech = SUBTECH_TO_CIPG.get(subtech)
     if cipg_tech is None:
         return None, None, "unmatched", coef_year, f"Subtech 未映射到 CIPG：{subtech}"
@@ -424,11 +451,11 @@ def select_power_coefficient(subtech, year, cipg):
         return None, cipg_tech, "unmatched", coef_year, f"CIPG 无 {coef_year} 年系数"
     note = ""
     if coef_year != year:
-        note = f"年份系数映射：{year}→{coef_year}；"
+        note = f"年份系数映射：{year}→{coef_year}（无对应年份时用最老可用系数）；"
     return coefficient, cipg_tech, "matched", coef_year, note
 
 
-def compute_power(cap_records, cap_years, cipg):
+def compute_power(cap_records, cap_years, cipg, cipg_years):
     """绿电铜量 = 装机(MW)/1000 * 系数(t/GW)，保留全精度。"""
     rows = []
     for rec in cap_records:
@@ -440,7 +467,7 @@ def compute_power(cap_records, cap_years, cipg):
         for year in cap_years:
             capacity = rec["_years"].get(year)
             coefficient, cipg_tech, status, coef_year, note = \
-                select_power_coefficient(subtech, year, cipg)
+                select_power_coefficient(subtech, year, cipg, cipg_years)
             row = {
                 "Scenario": scenario,
                 "_scn": norm_scenario(scenario),
@@ -491,7 +518,8 @@ def print_power_check(rows, cap_years, cipg_years):
             by_year[r["年份"]] += r["_copper"]
             by_tech[r["tech"]] += r["_copper"]
     print("逐年铜量(t)：")
-    print("  年份系数映射：2010→2021、2015→2021、2025→2030；其余年份使用当年系数")
+    mapping = {year: resolve_coef_year(year, cipg_years) for year in cap_years}
+    print(f"  年份系数映射：{mapping}")
     for year in cap_years:
         print(f"  {year}: {round_half_up(by_year.get(year, 0.0)):,}")
     print("分类合计(t, 全部年份)：")
@@ -701,8 +729,9 @@ def build_checks(veh_records, cap_records, veh_years, cap_years, cipg_years,
     for scn, region, sub in missing_power:
         add("缺失组合-绿电", f"{scn}|{region}", sub, "源表无记录")
 
-    override = Counter(r["年份"] for r in power_rows if r["年份"] in POWER_COEF_YEAR)
-    add("年份系数映射", "2010/2015→2021；2025→2030",
+    override = Counter((r["年份"], r["系数年份"]) for r in power_rows
+                       if r["年份"] != r["系数年份"])
+    add("年份系数映射", "无对应年份用最老可用系数；2025→2030",
         str(dict(sorted(override.items()))),
         "用户确认口径；明细「系数年份」列记录实际使用的 CIPG 年份")
     no_year = [r for r in power_rows if r["匹配状态"] == "unmatched"]
@@ -842,7 +871,7 @@ def build_checks(veh_records, cap_records, veh_years, cap_years, cipg_years,
         "示例：282 辆 × 776.8 kg/辆 ÷ 1000 = 219 t")
     add("单位换算-绿电", "MW ÷ 1000 = GW；GW × t/GW = t", "已执行",
         "示例：24,031 MW ÷ 1000 × 4500.714 t/GW = 108,157 t")
-    add("输出", str(RESULT_XLSX), "已写入", "5 个工作表")
+    add("输出", str(RESULT_XLSX), "已写入", "2 张面板")
     return checks
 
 
@@ -852,7 +881,7 @@ def build_notes():
         f"{tech} ← {' + '.join(TECH_SUBTECH_MAP[tech])}" for tech in TECH_ORDER)
     sub_map = "；".join(f"{sub} → {cipg}" for sub, cipg in SUBTECH_TO_CIPG.items())
     notes = [
-        ("方案依据", "项目内任务方案 PROMPT_给DeepSeek_铜需求量.md；2026-11-12 用户确认：2010/2015 用 2021 年系数、2025 用 2030 年系数、保留源表原写法"),
+        ("方案依据", "项目内任务方案 PROMPT_给DeepSeek_铜需求量.md；2026-11-12 确认 2025 用 2030 年系数、保留源表原写法；2026-11-14 确认新增 1990/2005 等年份，无对应系数时用最老可用年份（2021）"),
         ("输入-设备", f"{DEVICE_XLSX}；工作表「{VEHICLE_SHEET}」「{CAPACITY_SHEET}」（只读，未修改）"),
         ("输入-系数", f"{COEFF_XLSX}；工作表「{CIPG_SHEET}」「{AUTO_SHEET}」（只读；源文件被占用时读取临时副本）"),
         ("输出", str(RESULT_XLSX)),
@@ -865,14 +894,14 @@ def build_notes():
         ("绿电-Subtech→CIPG", sub_map),
         ("nuclear 映射", "源表 Subtech=nuclear 与 CIPG technology=nuclear 同名匹配；CIPG 中该行对应原 Gen_III/Gen_II_LWR 强度，两者数值相同"),
         ("wind 映射", "源表 tech=wind 含 Subtech=wind 与 wind_offshore；分别映射 CIPG wind 与 wind_offshore，汇总时相加"),
-        ("年份处理-车辆", "Automotive 系数无年份维度，2010–2050 各年同值"),
-        ("年份处理-绿电", "2010、2015 使用 2021 年 CIPG 系数；2025 使用 2030 年 CIPG 系数；其余年份使用当年系数；明细「系数年份」列记录实际使用年份"),
+        ("年份处理-车辆", "Automotive 系数无年份维度，1990–2050 各年同值"),
+        ("年份处理-绿电", "CIPG 年份为 2021、2030–2060；有对应年份用当年，无对应年份用最老可用年份 2021（如 1990、2005、2010、2015、2020）；2025 按已确认口径用 2030；明细「系数年份」列记录实际使用年份"),
         ("空值处理", "源表空白保留空白并登记，不填 0；保有量/装机为 0 时铜量为 0"),
         ("重复处理", "四张输入表主键均无重复；未做去重或行合并"),
         ("Scenario", "明细与汇总均保留源表原写法；汇总设「Scenario(车辆原写法)」「Scenario(绿电原写法)」两列，不做 - ↔ _ 归一"),
         ("取整", "中间值全精度；最终铜量(t) 按 floor(x+0.5) 取整；汇总表内先取整再求小计/合计，保证表面可加"),
         ("汇总取整说明", "分类单元格=明细显示值分组求和；小计/合计=已取整单元格之和；与未取整汇总的差异≤3 t/格"),
-        ("待确认", "输出年份是否保留全部 9 年；取整是否使用 floor(x+0.5)"),
+        ("待确认", "输出年份是否保留源表全部年份；取整是否使用 floor(x+0.5)"),
     ]
     return [{"项目": k, "内容": v} for k, v in notes]
 
@@ -1236,7 +1265,7 @@ def main():
     print_vehicle_check(veh_rows, veh_years)
     print()
 
-    power_rows = compute_power(cap, cap_years, cipg)
+    power_rows = compute_power(cap, cap_years, cipg, cipg_years)
     print_power_check(power_rows, cap_years, cipg_years)
     print()
 
