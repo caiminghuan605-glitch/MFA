@@ -39,7 +39,7 @@ POWER_FIELDS = ["Scenario", "region", "tech", "Subtech", "单位"] + list(g.POWE
 # 旧面板/旧明细已有年份（2010 起），用于核对本次扩展没有改变既有结果
 BASELINE_POWER_YEARS = [y for y in g.POWER_PANEL_YEARS if y >= 2010]
 
-BASELINE_DETAIL = os.path.join(g.OUTPUT_DIR, "_baseline_power_detail_pre_reclass.csv")
+BASELINE_DETAIL = os.path.join(g.OUTPUT_DIR, "_baseline_power_detail_2010_2050.csv")
 BASELINE_CATEGORIES = os.path.join(g.OUTPUT_DIR, "_baseline_power_categories_pre_reclass.csv")
 BASELINE_FINAL = os.path.join(g.OUTPUT_DIR, "_baseline_能源转型设备所有量_pre_reclass.xlsx")
 REPORT_TXT = os.path.join(g.OUTPUT_DIR, "_power_reclass_verification.txt")
@@ -330,6 +330,9 @@ def verify_unrounded_unchanged(detail, baseline):
     """未取整口径核对：1:1 类别不变；biomass/coal 拆分合计等于旧类别；风电 tech 合计对应旧两类之和。"""
     if baseline is None:
         return {"skipped": True}
+    if "Category" not in baseline[0]:
+        # 本基线是上一版 tech/Subtech 明细，不含旧九类字段
+        return {"skipped": True}
     old_sums, old_seen, _ = _sum_by(baseline, "Category", "InstalledCapacity_MW_unrounded")
     new_sums, new_seen, _ = _sum_by(detail, "Subtech", "InstalledCapacity_MW_unrounded")
 
@@ -548,7 +551,7 @@ def main():
 
     pstat = verify_panel_against_old(old_power_header, old_power_rows, power_rows)
     if not pstat["skipped"] and pstat["diff"]:
-        problems.append("2010–2050 电力面板既有值发生变化 %d 处" % pstat["diff"])
+        problems.append("电力面板既有值发生变化 %d 处" % pstat["diff"])
 
     # ---------------- 报告 ----------------
     hist_detail = [r for r in detail if r["Year"] < 2010]
@@ -596,7 +599,7 @@ def main():
 
     add("[4] 未取整汇总核对")
     if ustat["skipped"]:
-        add("  跳过：找不到基线明细")
+        add("  基线为上一版 tech/Subtech 明细，无旧九类字段；逐键核对见 [3]")
     else:
         for old_cat, new_sub, groups, mism, missing in ustat["one_to_one"]:
             add("  %-22s -> %-22s 组数 %4d，差异 %d，缺记录 %d"
@@ -624,7 +627,7 @@ def main():
         add("        差异仅可能为 ±1，属原取整规则的正常结果，未人为调整。")
     add("")
 
-    add("[6] 最终面板对照更新前旧面板（2010–2050）")
+    add("[6] 最终面板对照更新前旧面板（既有年份）")
     if pstat["skipped"]:
         add("  跳过：更新前工作簿没有旧电力面板")
     else:
