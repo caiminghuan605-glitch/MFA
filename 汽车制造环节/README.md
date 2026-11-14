@@ -147,6 +147,7 @@ python build_and_verify.py     # 更新最终双面板工作簿并全量核验
 | `0ffb9ea` | `gcam_common.py`、`convert_transport.py` | 年份范围扩展到 1990–2050，车辆/电力面板加入 1990、2005 |
 | `b1ff507` | `convert_power.py` | 1990/2005 从容量因子长表按 2010+ 同源文件补齐 CF 并重算 |
 | `8995a04` | `build_and_verify.py` | 最终双面板扩展到 1990–2050，保留既有年份并核验 |
+| `541ec22` | `build_and_verify.py` | 修正旧面板对比年份说明与基线字段提示 |
 | （本次） | `README.md` | 补充 1990–2050 年份扩展、历史 CF 口径与核验结果 |
 
 ## BEV/PHEV 技术占比处理参考文献
