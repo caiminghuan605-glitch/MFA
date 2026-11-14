@@ -1,0 +1,17 @@
+# 项目代码与Python环境
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# 大体积输入回退副本与缓存（不入库）
+cache/
+
+# 生成成果与运行日志（统一写入 MFA/Output，不在代码目录保存副本）
+*.xlsx
+*.log
+*.tmp
+
+# 运行中间产物
+outputs/

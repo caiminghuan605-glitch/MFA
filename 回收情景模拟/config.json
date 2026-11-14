@@ -1,0 +1,273 @@
+{
+  "meta": {
+    "project": "能源转型设备退役铜与次生铜核算（DMFA）",
+    "version": "1.0.0",
+    "created": "2026-11-13",
+    "notes": "所有路径与关键假设集中在本文件；两个脚本均从此读取。输入文件全部只读。"
+  },
+  "paths": {
+    "output_dir": "C:\\Users\\22965\\OneDrive\\桌面\\MFA\\Output",
+    "stock_xlsx": "C:\\Users\\22965\\OneDrive\\桌面\\MFA\\Output\\保有量.xlsx",
+    "copper_stock_xlsx": "C:\\Users\\22965\\OneDrive\\桌面\\MFA\\Output\\铜存量.xlsx",
+    "device_xlsx": "C:\\Users\\22965\\OneDrive\\桌面\\MFA\\Output\\保有量.xlsx",
+    "data_xlsx": "C:\\Users\\22965\\OneDrive\\桌面\\关键矿产\\数据\\数据.xlsx",
+    "ccs_raw_cf_xlsx": "C:\\Users\\22965\\OneDrive\\桌面\\关键矿产\\数据\\GCAM\\电力\\电力部门_容量因子.xlsx",
+    "ccs_match_xlsx": "C:\\Users\\22965\\OneDrive\\桌面\\关键矿产\\数据\\GCAM\\电力\\GCAM_发电量_容量因子匹配_2010-2050.xlsx",
+    "recycling_xlsx": "C:\\Users\\22965\\OneDrive\\桌面\\关键矿产\\数据\\数据文献支持\\回收情景参考文献\\全球退役设备铜回收率_四情景逐年结果.xlsx",
+    "trade_xlsx": "C:\\Users\\22965\\OneDrive\\桌面\\关键矿产\\数据\\数据文献支持\\回收情景参考文献\\Nature_区域运输流向与铜价值分摊_全球贸易情景（运输成本）.xlsx",
+    "life_md": "C:\\Users\\22965\\OneDrive\\桌面\\关键矿产\\数据\\MFA\\回收过程\\寿命分布核验结果\\寿命分布文献核验与映射说明.md",
+    "step1_out": "C:\\Users\\22965\\OneDrive\\桌面\\MFA\\Output\\能源转型设备退役铜量_第一步.xlsx",
+    "step2_out": "C:\\Users\\22965\\OneDrive\\桌面\\MFA\\Output\\能源转型设备次生铜产量_第二步.xlsx",
+    "method_md": "C:\\Users\\22965\\OneDrive\\桌面\\MFA\\Output\\能源转型设备退役与次生铜核算_方法与文献说明.md",
+    "year_template": "cache/year_template.json",
+    "step1_baseline": "cache/baseline_step1_before_con.xlsx",
+    "fallback_dir": "cache"
+  },
+  "model": {
+    "driver": "capacity",
+    "early_retirement": "economic",
+    "negative_tol_abs": 1e-06,
+    "negative_tol_rel": 1e-09,
+    "coef_interp": "linear",
+    "coef_floor_year": 2021,
+    "hydro_intensity_normalize": true,
+    "note": "设备量驱动：Q=保有量/装机；R=ΣI·p；I=ΔQ+R；I<0 的缺口记为经济性提前退役（最老批次）。铜强度按投入年固定。"
+  },
+  "sheets": {
+    "vehicle_device_panel": "车辆保有量_面板",
+    "power_device_panel": "装机容量_九类_面板",
+    "vehicle_out_panel": "车辆退役铜_面板",
+    "power_out_panel": "绿电退役铜_面板",
+    "power_generation": "power generation",
+    "capacity_factor": "CF",
+    "cipg": "CIPG",
+    "life": "life",
+    "ccs_raw_sheet": "electricity_water",
+    "recycling_rate": "逐年回收率",
+    "recycling_base": "基准与区域映射",
+    "trade_matrix": "贸易原始矩阵_32x32",
+    "trade_routes": "贸易明细_270"
+  },
+  "years": {
+    "vehicle_start": 2010,
+    "power_start": 1990,
+    "end": 2050,
+    "step2_start": 2021,
+    "step2_end": 2050,
+    "recycling_calibration_year": 2021,
+    "recycling_target_year": 2060,
+    "report_years_note": "第一步车辆2010—2050、发电1990—2050；第二步正式比较期2021—2050；回收率原始目标年2060不改为2050。"
+  },
+  "scenarios": {
+    "canonical": ["SSP1-2.6", "SSP2-4.5", "SSP5-8.5"],
+    "vehicle_names": {
+      "SSP1-2.6": "SSP1-2p6",
+      "SSP2-4.5": "SSP2-4p5",
+      "SSP5-8.5": "SSP5_8p5"
+    },
+    "power_names": {
+      "SSP1-2.6": "SSP1_2p6",
+      "SSP2-4.5": "SSP2_4p5",
+      "SSP5-8.5": "SSP5_8p5"
+    }
+  },
+  "devices": {
+    "vehicle_subsectors": ["Bus", "Car", "Heavy truck", "Large Car and Truck", "Light truck", "Medium truck", "Mini Car"],
+    "vehicle_technologies": ["BEV", "PHEV"],
+    "power_tech_order": ["PV", "biomass_CCS", "coal_CCS", "gas_CCS", "hydro", "nuclear", "refined liquids_CCS", "wind"],
+    "power_subtech_order": ["PV", "biomass_IGCC_CCS", "biomass_conv_CCS", "coal_IGCC_CCS", "coal_conv_pul_CCS", "gas_CC_CCS", "hydro", "nuclear", "refined liquids_CC_CCS", "wind", "wind_offshore"],
+    "subtech_to_tech": {
+      "PV": "PV",
+      "biomass_IGCC_CCS": "biomass_CCS",
+      "biomass_conv_CCS": "biomass_CCS",
+      "coal_IGCC_CCS": "coal_CCS",
+      "coal_conv_pul_CCS": "coal_CCS",
+      "gas_CC_CCS": "gas_CCS",
+      "hydro": "hydro",
+      "nuclear": "nuclear",
+      "refined liquids_CC_CCS": "refined liquids_CCS",
+      "wind": "wind",
+      "wind_offshore": "wind"
+    },
+    "subtech_to_cipg": {
+      "PV": "PV",
+      "biomass_IGCC_CCS": "biomass_IGCC_CCS",
+      "biomass_conv_CCS": "biomass_conv_CCS",
+      "coal_IGCC_CCS": "coal_IGCC_CCS",
+      "coal_conv_pul_CCS": "coal_conv_pul_CCS",
+      "gas_CC_CCS": "gas_CC_CCS",
+      "hydro": "hydro",
+      "nuclear": "nuclear",
+      "refined liquids_CC_CCS": "refined liquids_CC_CCS",
+      "wind": "wind",
+      "wind_offshore": "wind_offshore"
+    },
+    "rawtech_to_subtech": {
+      "rooftop_pv": "PV",
+      "PV": "PV",
+      "PV_storage": "PV",
+      "wind": "wind",
+      "wind_storage": "wind",
+      "wind_offshore": "wind_offshore",
+      "Gen_II_LWR": "nuclear",
+      "Gen_III": "nuclear",
+      "hydro": "hydro",
+      "biomass (IGCC CCS)": "biomass_IGCC_CCS",
+      "biomass (conv CCS)": "biomass_conv_CCS",
+      "coal (IGCC CCS)": "coal_IGCC_CCS",
+      "coal (conv pul CCS)": "coal_conv_pul_CCS",
+      "gas (CC CCS)": "gas_CC_CCS",
+      "refined liquids (CC CCS)": "refined liquids_CC_CCS"
+    },
+    "ccs_rawtech": [
+      "biomass (IGCC CCS)",
+      "biomass (conv CCS)",
+      "coal (IGCC CCS)",
+      "coal (conv pul CCS)",
+      "gas (CC CCS)",
+      "refined liquids (CC CCS)"
+    ]
+  },
+  "life": {
+    "source": "数据.xlsx / life（基准寿命）；解释见 寿命分布文献核验与映射说明.md；本次不启用 Low/Medium/High 延寿情景",
+    "distributions": {
+      "Passenger Car": {"type": "weibull", "k": 2.07, "scale": 14.46},
+      "Light Truck": {"type": "weibull", "k": 5.58, "scale": 8.02},
+      "Medium Truck": {"type": "weibull", "k": 5.58, "scale": 10.09},
+      "Heavy Truck": {"type": "weibull", "k": 5.58, "scale": 12.8},
+      "Bus (Transit proxy)": {"type": "fixed", "life": 9},
+      "PV": {"type": "weibull", "k": 5.3759, "scale": 30},
+      "Wind - Onshore": {"type": "weibull", "k": 4.25, "scale": 19.48},
+      "Wind - Offshore": {"type": "weibull", "k": 4.25, "scale": 19.48},
+      "Small Hydro": {"type": "normal", "mu": 50, "sigma": 15},
+      "Medium Hydro": {"type": "normal", "mu": 70, "sigma": 15},
+      "Large Hydro / PSH": {"type": "normal", "mu": 80, "sigma": 15},
+      "Nuclear - PWR": {"type": "normal", "mu": 40, "sigma": 8},
+      "CCS": {"type": "normal", "mu": 35, "sigma": 10}
+    },
+    "vehicle_map": {
+      "Bus": {"category": "Bus (Transit proxy)", "note": "Transit bus 9年固定寿命代理（Hao et al. 2011）；源表Bus未注明营运属性"},
+      "Car": {"category": "Passenger Car", "note": "Passenger car 直接匹配"},
+      "Mini Car": {"category": "Passenger Car", "note": "无独立参数，沿用Passenger car（共享代理）"},
+      "Large Car and Truck": {"category": "Passenger Car", "note": "名称混合，按大型乘用车/SUV代理，低置信度"},
+      "Light truck": {"category": "Light Truck", "note": "轻型卡车直接匹配"},
+      "Medium truck": {"category": "Medium Truck", "note": "中型卡车直接匹配"},
+      "Heavy truck": {"category": "Heavy Truck", "note": "重型卡车直接匹配"}
+    },
+    "power_map": {
+      "PV": {"category": "PV", "note": "PV各电池路线共用Weibull"},
+      "wind": {"category": "Wind - Onshore", "note": "陆上风电直接匹配"},
+      "wind_offshore": {"category": "Wind - Offshore", "note": "海上风电共用同一Wind分布（原文未分海陆）"},
+      "nuclear": {"category": "Nuclear - PWR", "note": "Gen_II_LWR/Gen_III均为轻水堆，映射PWR统一核电分布"},
+      "hydro": {"category": "HYDRO_CON", "note": "CON保守情景：内部按小型/中型/大型（含抽蓄）分别计算，正式结果合并为hydro"},
+      "biomass_IGCC_CCS": {"category": "CCS", "note": "CCS统一Normal(35,10)"},
+      "biomass_conv_CCS": {"category": "CCS", "note": "CCS统一Normal(35,10)"},
+      "coal_IGCC_CCS": {"category": "CCS", "note": "CCS统一Normal(35,10)"},
+      "coal_conv_pul_CCS": {"category": "CCS", "note": "CCS统一Normal(35,10)"},
+      "gas_CC_CCS": {"category": "CCS", "note": "CCS统一Normal(35,10)"},
+      "refined liquids_CC_CCS": {"category": "CCS", "note": "CCS统一Normal(35,10)"}
+    },
+    "hydro_con": {
+      "status": "CON_SCENARIO_WEIGHTS",
+      "description": "CON保守情景规模结构：1990—2021固定小型20%/中型16%/大型64%（含抽蓄）；2022—2050中型固定16%，小型按中国CON装机路径换算份额，大型取余。容量份额统一用于全球32区与三条能源路径，性质为“中国CON规模结构的全球代理外推”。",
+      "total_capacity_gw": 380.574,
+      "total_capacity_source": "C:\\Users\\22965\\OneDrive\\桌面\\MFA\\Output\\能源转型设备所有量.xlsx / 装机容量_九类_面板 / China-Hydro 2021—2050 = 380574 MW（三条能源路径均相同）",
+      "history_shares": {"small": 0.20, "medium": 0.16, "large": 0.64},
+      "medium_share": 0.16,
+      "small_capacity_gw": {"2021": 76.1148, "2030": 93.0, "2050": 100.0},
+      "large_internal_ratio": {"reservoir_large": 49, "psh": 15},
+      "copper_intensity_t_per_gw": {
+        "small_ror": 4209,
+        "medium_reservoir": 2931,
+        "large_reservoir": 1713,
+        "psh": 3166
+      },
+      "intensity_decline_note": "补充表5：表中强度均按每年3‰递减；三个规模共用同一递减系数，在铜权重归一化中抵消，本实现直接使用表5常数强度。",
+      "reference": "Dong et al. (2025) DOI 10.1038/s41467-025-56592-5：补充方法9（中型16%、CON小水电93/100/102 GW）、补充表1（规模寿命）、补充表5（规模铜强度）；上游来源据该补充材料参考文献71（IEA 2021）、72（中国水利部/国家统计局 2013）、76（UNIDO 2020）转引。",
+      "large_internal_note": "大型内部49（大型水库）:15（抽蓄）取自2021年参考构成（RoR 20、RES 65、PSH 15；中型16为RES的一部分，故大型水库=65-16=49）；论文未给出未来固定49:15，固定该比例为本实现假设。"
+    },
+    "amax": 200,
+    "tail_tolerance": 1e-10
+  },
+  "recycling": {
+    "scenarios": ["基准", "政策推动", "技术进步"],
+    "trade_scenarios": ["不开放", "全球开放"],
+    "device_categories": ["新能源汽车", "光伏", "陆上风电", "海上风电", "水电", "核电", "CCS相关设备"],
+    "device_map": {
+      "新能源汽车": {"waste": "ELV", "source": "车辆"},
+      "光伏": {"waste": "WEEE", "source": "绿电"},
+      "陆上风电": {"waste": "IEW", "source": "绿电"},
+      "海上风电": {"waste": "IEW", "source": "绿电"},
+      "水电": {"waste": "IEW", "source": "绿电"},
+      "核电": {"waste": "IEW", "source": "绿电"},
+      "CCS相关设备": {"waste": "IEW", "source": "绿电"}
+    },
+    "subtech_to_device": {
+      "PV": "光伏",
+      "wind": "陆上风电",
+      "wind_offshore": "海上风电",
+      "hydro": "水电",
+      "nuclear": "核电",
+      "biomass_IGCC_CCS": "CCS相关设备",
+      "biomass_conv_CCS": "CCS相关设备",
+      "coal_IGCC_CCS": "CCS相关设备",
+      "coal_conv_pul_CCS": "CCS相关设备",
+      "gas_CC_CCS": "CCS相关设备",
+      "refined liquids_CC_CCS": "CCS相关设备"
+    },
+    "param_columns": {
+      "data_range": 0,
+      "region": 1,
+      "device": 2,
+      "waste": 3,
+      "year": 4,
+      "collection": 5,
+      "processing": 6,
+      "combined_base": 7,
+      "combined_policy": 8,
+      "combined_tech": 9
+    },
+    "data_range_filter": "GCAM 32区",
+    "excluded_data_ranges": ["给定地区"],
+    "baseline_processing_fallback": {"ELV": 0.54, "WEEE": 0.54, "IEW": 0.69}
+  },
+  "trade": {
+    "processing_regions": [
+      "Australia_NZ", "Brazil", "Canada", "Chinese Mainland", "Chinese Taiwan",
+      "EU-12", "EU-15", "Europe_Non_EU", "European_Free_Trade", "Japan",
+      "Mexico", "South Africa", "South Korea", "Southeast Asia", "USA"
+    ],
+    "export_regions": [
+      "Africa_Eastern", "Africa_Northern", "Africa_Southern", "Africa_Western",
+      "Argentina", "C. America and Caribbean", "Central Asia", "Colombia",
+      "India", "Indonesia", "Middle East", "Pakistan", "Russia",
+      "South America_Northern", "South America_Southern", "South Asia", "Ukraine"
+    ],
+    "capacity_note": "15个本地处理区域设为有处理能力；17个全出口区域设为无本地处理能力。该处理能力边界为研究设定，不是对现实产能的实测判断。",
+    "static_matrix": "整个2021—2050正式比较期采用同一贸易矩阵，不设过渡期。"
+  },
+  "region_aliases": {
+    "China": {"canonical": "Chinese Mainland", "basis": "GCAM区域中文名对应；回收率与贸易矩阵使用 Fig8 名称"},
+    "Taiwan": {"canonical": "Chinese Taiwan", "basis": "GCAM区域中文名对应；回收率与贸易矩阵使用 Fig8 名称"},
+    "European Free Trade Association": {"canonical": "European_Free_Trade", "basis": "Fig8 与 Fig9 区域别名（说明表区域别名2）"},
+    "Central America and Caribbean": {"canonical": "C. America and Caribbean", "basis": "Fig8 与 Fig9 区域别名（说明表区域别名1）"}
+  },
+  "assumptions": {
+    "vehicle_init": "以每个车辆序列在保有量面板中首个正值节点为投入起点 t0：Q(t0) 作为初始批次（年龄0，当年不退役）；t<t0 无投入无退役。车辆序列多数从2010—2030开始，属研究初始化假设，不是观测投运年份。",
+    "power_init": "以每个发电序列在装机面板中首个正值节点为投入起点 t0（多数为1990）：Q(t0) 作为初始批次（年龄0，当年不退役）；t<t0 无投入无退役。属研究初始化假设。",
+    "interpolation": "有效节点之间按线性插值到年，保留全部节点；空白节点不填0，按相邻有效节点插值并登记；不在年份范围外外推；全零序列保持零。",
+    "no_retire_in_birth_year": "新投入当年不退役（p(0)=0）。",
+    "early_retirement": "I_t=Q_t−Q_(t−1)+R_t<0 时，缺口 E_t=−I_t 记为经济性提前退役，按最老批次优先扣减，I_t=0；仅由设备量下降触发，与自然退役分列，不用于吸收铜强度下降。浮点级缺口按0处理并登记。",
+    "historical_cf": "本次不再由发电量×容量因子重建历史装机；设备量直接来自保有量面板，容量因子不参与计算。",
+    "historical_cipg": "投入年早于 CIPG 最早有效年（2021）时使用 2021 年值；2021 之后在 2021/2030/2035/…/2060 节点间线性插值，不外推。",
+    "stock_metric": "设备量驱动：铜存量=Σ（存活批次×投入年铜强度）；不再用铜存量面板反推退役。",
+    "model_investment": "新增=Q_t−Q_(t−1)+R_t，含替换退役设备的投入；是设备量驱动下的内部反推量，不是观测值。",
+    "trade_matrix_scope": "所有纳入设备在开放情景统一采用同一Nature贸易矩阵，属用户指定的跨设备空间分配假设（外推）。",
+    "no_capacity_limit": "主算例假定15个处理区域可处理全部分配量，不设产能上限、库存、暂存量或运输损失。",
+    "no_transport_cost": "光伏运输成本与铜价值分摊参数不参与物质量公式。",
+    "recycling_period": "正式比较期2021—2050为退役铜与回收率数据的共同覆盖期；回收率文件到2060年，不将设备量数据外推到2060年，回收目标年仍为2060。",
+    "missing_2020_vehicle": "保有量车辆面板对 SSP2-4.5 与 SSP5-8.5 的 Central Asia 共 20 个序列在 2020 年为空；不填0，按相邻有效节点插值（等价于跳过该节点），影响见核验结果。",
+    "coefficient_rule": "车辆用 Automotive copper demand（kg/vehicle，常数）；发电用 CIPG（t/GW）；每个批次在投入年确定强度并固定，退役批次用其投入年强度。",
+    "hydro_scale_rule": "CON 规模份额直接作用于装机（不是铜存量再分配）；规模强度取补充表5（大型49:15加权），按项目 hydro CIPG 路径缩放并以 2021 综合强度归一；正式结果汇总为一条 hydro。"
+  }
+}

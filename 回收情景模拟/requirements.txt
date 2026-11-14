@@ -1,0 +1,4 @@
+# 运行本项目两个脚本所需依赖（Python 3.10 及以上）
+numpy>=1.24
+openpyxl>=3.1
+XlsxWriter>=3.1
