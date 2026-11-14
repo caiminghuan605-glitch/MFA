@@ -2,24 +2,22 @@
 """把电力重分类结果导出到最终双面板工作簿，并做全量核验。
 
 最终成果：C:\\Users\\22965\\OneDrive\\桌面\\MFA\\Output\\能源转型设备所有量.xlsx
-  - 车辆保有量_面板：原样保留，逐单元格不改（本脚本只读该表并回写同一工作簿）
+  - 车辆保有量_面板：既有年份逐格保留，并新增 1990、2005 两列（源服务量为 0，
+    BEV/PHEV 均记 0）
   - 装机容量_九类_面板：保留历史表名；实际列为 Scenario、region、tech、Subtech、
-    单位、各年份，内容为八类 tech、十一类 Subtech（不混入 tech 合计行）
+    单位、1990、2005、2010…2050，内容为八类 tech、十一类 Subtech（不混入 tech 合计行）
 
 流程：
   1. convert_power.compute() 从原始技术重新计算未取整装机，再按
      Scenario+region+Year+tech+Subtech 汇总并四舍五入；
   2. 构造电力面板（剔除该 Scenario-region 下全部年份均无源记录的 Subtech 行，
      与旧最终面板“源表无记录则不出行”的口径一致）；
-  3. 打开现有最终工作簿，保留车辆面板，替换电力面板后原子写回；
-  4. 重新打开文件，逐单元格比对车辆面板，检查面板主键唯一性与映射一致性，
-     并与修改前基线（明细、旧分类合计、旧面板）核对未取整与取整结果。
+  3. 打开现有最终工作簿，扩展车辆面板年份，替换电力面板后原子写回；
+  4. 重新打开文件，核对车辆既有年份逐格不变、1990/2005 为 0，检查面板主键
+     唯一性与映射一致性，并对照更新前旧面板核对 2010–2050 既有值。
 
-基线文件由本次修改前保存，位于 Output 下：
-  - _baseline_power_detail_pre_reclass.csv
-  - _baseline_power_categories_pre_reclass.csv
-  - _baseline_能源转型设备所有量_pre_reclass.xlsx
-若基线不存在，对应核对会跳过并在报告中注明，不影响导出。
+若 Output 下存在旧明细基线（_baseline_power_detail_pre_reclass.csv 等），
+会额外做原始技术发电量/CF/未取整装机的逐键核对；不存在则跳过并在报告中注明。
 """
 import csv
 import math
@@ -35,7 +33,11 @@ import convert_power as cp
 
 VEHICLE_SHEET = g.VEHICLE_PANEL_SHEET
 POWER_SHEET = g.POWER_PANEL_SHEET
+VEHICLE_KEY_FIELDS = ["Scenario", "Region", "Subsector", "Technology", "单位"]
+VEHICLE_FIELDS = VEHICLE_KEY_FIELDS + list(g.VEHICLE_PANEL_YEARS)
 POWER_FIELDS = ["Scenario", "region", "tech", "Subtech", "单位"] + list(g.POWER_PANEL_YEARS)
+# 旧面板/旧明细已有年份（2010 起），用于核对本次扩展没有改变既有结果
+BASELINE_POWER_YEARS = [y for y in g.POWER_PANEL_YEARS if y >= 2010]
 
 BASELINE_DETAIL = os.path.join(g.OUTPUT_DIR, "_baseline_power_detail_pre_reclass.csv")
 BASELINE_CATEGORIES = os.path.join(g.OUTPUT_DIR, "_baseline_power_categories_pre_reclass.csv")
@@ -119,8 +121,38 @@ def _read_power_sheet(path):
     return header, rows
 
 
+def _extend_vehicle_sheet(ws):
+    """把车辆面板年份扩展到 g.VEHICLE_PANEL_YEARS。
+
+    已有年份逐格保留；新增的 1990、2005 两年，交通源表服务量为 0，
+    因此 BEV/PHEV 均记 0。返回是否发生了扩展。
+    """
+    header = [c.value for c in ws[1]]
+    if header == VEHICLE_FIELDS:
+        return False
+    missing = [f for f in VEHICLE_KEY_FIELDS if f not in header]
+    if missing:
+        raise SystemExit("车辆面板缺少字段：%s" % missing)
+    old_idx = {h: i for i, h in enumerate(header)}
+    old_rows = [tuple(r) for r in ws.iter_rows(min_row=2, values_only=True)]
+    new_rows = []
+    for r in old_rows:
+        row = [r[old_idx[f]] for f in VEHICLE_KEY_FIELDS]
+        for y in g.VEHICLE_PANEL_YEARS:
+            row.append(r[old_idx[y]] if y in old_idx else 0)
+        new_rows.append(row)
+    ws.delete_rows(1, ws.max_row)
+    ws.append(VEHICLE_FIELDS)
+    for row in new_rows:
+        ws.append(row)
+    return True
+
+
 def update_final_workbook(path, power_rows):
-    """保留车辆面板，替换电力面板，原子写回同一文件。返回 (vehicle_before, vehicle_after, power_after)。"""
+    """保留车辆面板并扩展年份，替换电力面板，原子写回同一文件。
+
+    返回 (vehicle_before, vehicle_after, old_power_header, old_power_rows, power_after)。
+    """
     if not os.path.exists(path):
         raise SystemExit(
             "找不到最终工作簿：%s\n"
@@ -133,8 +165,14 @@ def update_final_workbook(path, power_rows):
         raise SystemExit("最终工作簿缺少工作表：%s" % VEHICLE_SHEET)
 
     vehicle_before = _sheet_values(wb[VEHICLE_SHEET])
+    _extend_vehicle_sheet(wb[VEHICLE_SHEET])
 
+    old_power_header = None
+    old_power_rows = None
     if POWER_SHEET in wb.sheetnames:
+        old_ws = wb[POWER_SHEET]
+        old_power_header = [c.value for c in old_ws[1]]
+        old_power_rows = [tuple(r) for r in old_ws.iter_rows(min_row=2, values_only=True)]
         del wb[POWER_SHEET]
     ws = wb.create_sheet(POWER_SHEET, 1)
     ws.append(POWER_FIELDS)
@@ -148,24 +186,46 @@ def update_final_workbook(path, power_rows):
 
     vehicle_after = _read_vehicle_sheet(path)
     power_after = _read_power_sheet(path)
-    return vehicle_before, vehicle_after, power_after
+    return (vehicle_before, vehicle_after, old_power_header, old_power_rows,
+            power_after)
 
 
 # --------------------------------------------------------------------------- #
 # 核验
 # --------------------------------------------------------------------------- #
-def verify_vehicle(before, after):
-    """逐单元格比对车辆面板（含表头与行顺序）。"""
+def verify_vehicle_preserved(before, after):
+    """核对车辆面板：既有年份逐单元格不变；新增 1990/2005 两列为 0。"""
     diffs = []
-    if len(before) != len(after):
-        diffs.append(("行数", len(before), len(after)))
-    for i, (ra, rb) in enumerate(zip(before, after)):
-        if len(ra) != len(rb):
-            diffs.append(("列数@行%d" % (i + 1), len(ra), len(rb)))
-            continue
-        for j, (a, b) in enumerate(zip(ra, rb)):
-            if a != b:
-                diffs.append(("行%d列%d" % (i + 1, j + 1), a, b))
+    bh = list(before[0])
+    ah = list(after[0])
+    if ah != VEHICLE_FIELDS:
+        diffs.append(("表头", ah, VEHICLE_FIELDS))
+        return diffs
+    if len(before) - 1 != len(after) - 1:
+        diffs.append(("行数", len(before) - 1, len(after) - 1))
+        return diffs
+
+    old_years = [y for y in bh if isinstance(y, int)]
+    new_years = [y for y in ah if isinstance(y, int)]
+    added = [y for y in new_years if y not in old_years]
+    missing_new = [y for y in (1990, 2005) if y not in new_years]
+    if missing_new:
+        diffs.append(("缺少新增年份", missing_new, [1990, 2005]))
+    if added and set(added) != {1990, 2005}:
+        diffs.append(("新增年份", added, [1990, 2005]))
+
+    bi = {h: i for i, h in enumerate(bh)}
+    ai = {h: i for i, h in enumerate(ah)}
+    for i, (rb, ra) in enumerate(zip(before[1:], after[1:])):
+        for f in VEHICLE_KEY_FIELDS:
+            if rb[bi[f]] != ra[ai[f]]:
+                diffs.append(("行%d %s" % (i + 2, f), rb[bi[f]], ra[ai[f]]))
+        for y in old_years:
+            if rb[bi[y]] != ra[ai[y]]:
+                diffs.append(("行%d 年%d" % (i + 2, y), rb[bi[y]], ra[ai[y]]))
+        for y in (1990, 2005):
+            if y in ai and ra[ai[y]] not in (0, None):
+                diffs.append(("行%d 年%d 应为0" % (i + 2, y), ra[ai[y]], 0))
     return diffs
 
 
@@ -215,11 +275,16 @@ def _detail_key(r, year_field="Year"):
 
 
 def verify_detail_unchanged(detail, baseline):
-    """原始技术的发电量、CF、未取整装机逐键与修改前基线比对。"""
+    """原始技术的发电量、CF、未取整装机逐键与修改前基线比对。
+
+    基线只有 2010–2050；本次新增的 1990/2005 单独计数，不参与旧基线比对。
+    """
     if baseline is None:
         return {"skipped": True}
+    base_years = {str(y) for y in BASELINE_POWER_YEARS}
     old = {_detail_key(r): r for r in baseline}
-    new = {_detail_key(r): r for r in detail}
+    new_all = {_detail_key(r): r for r in detail}
+    new = {k: v for k, v in new_all.items() if k[4] in base_years}
     key_diff = set(old) ^ set(new)
     fields = ["Generation_EJ", "CapacityFactor", "InstalledCapacity_MW_unrounded"]
     mismatches = []
@@ -240,6 +305,7 @@ def verify_detail_unchanged(detail, baseline):
         "skipped": False,
         "old_rows": len(baseline),
         "new_rows": len(detail),
+        "new_hist_rows": len(new_all) - len(new),
         "key_diff": len(key_diff),
         "mismatches": mismatches,
     }
@@ -390,58 +456,34 @@ def verify_rounded(old_cats, new_subs):
     return {"skipped": False, "one_to_one": exact, "split": split}
 
 
-def verify_panel_against_baseline(baseline_path, power_rows):
-    """最终面板层面：未调整分类的整数逐格不变；biomass/coal 分别取整差异单独统计。"""
-    if not os.path.exists(baseline_path):
+def verify_panel_against_old(old_header, old_rows, power_rows):
+    """最终面板对照更新前的同结构面板：2010–2050 既有年份逐格不变。"""
+    if old_header is None or old_rows is None:
         return {"skipped": True}
-    header, old_rows = _read_power_sheet(baseline_path)
-    if header is None:
-        return {"skipped": True}
-    # 旧表列为 Scenario,region,归并类别,单位,年份...
+    old_years = [y for y in old_header if isinstance(y, int)]
     old_vals = {}
     for r in old_rows:
-        for j, y in enumerate(g.POWER_PANEL_YEARS):
-            old_vals[(r[0], r[1], r[2], str(y))] = r[4 + j]
+        for j, y in enumerate(old_years):
+            old_vals[(r[0], r[1], r[2], r[3], str(y))] = r[5 + j]
 
     new_vals = {}
     for r in power_rows:
         for y in g.POWER_PANEL_YEARS:
-            new_vals[(r["Scenario"], r["region"], r["Subtech"], str(y))] = r[y]
+            new_vals[(r["Scenario"], r["region"], r["tech"],
+                      r["Subtech"], str(y))] = r[y]
 
-    exact = []
-    for old_cat, new_sub in ONE_TO_ONE:
-        diff = 0
-        examples = []
-        for (s, reg, cat, y), ov in old_vals.items():
-            if cat != old_cat:
-                continue
-            nv = new_vals.get((s, reg, new_sub, y))
-            if ov != nv:
-                diff += 1
-                if len(examples) < 3:
-                    examples.append(((s, reg, y), ov, nv))
-        exact.append((old_cat, new_sub, diff, examples))
-
-    split = []
-    for old_cat, subs in SPLIT:
-        diff = 0
-        max_abs = 0
-        examples = []
-        for (s, reg, cat, y), ov in old_vals.items():
-            if cat != old_cat:
-                continue
-            vals = [new_vals.get((s, reg, sub, y)) for sub in subs]
-            if any(v is None for v in vals):
-                continue
-            nv = sum(vals)
-            if ov != nv:
-                diff += 1
-                max_abs = max(max_abs, abs(nv - ov))
-                if len(examples) < 3:
-                    examples.append(((s, reg, y), ov, nv))
-        split.append((old_cat, "+".join(subs), diff, max_abs, examples))
-
-    return {"skipped": False, "one_to_one": exact, "split": split}
+    diff = 0
+    compared = 0
+    examples = []
+    for k, ov in old_vals.items():
+        compared += 1
+        nv = new_vals.get(k)
+        if ov != nv:
+            diff += 1
+            if len(examples) < 5:
+                examples.append((k, ov, nv))
+    return {"skipped": False, "compared": compared,
+            "diff": diff, "examples": examples}
 
 
 # --------------------------------------------------------------------------- #
@@ -459,22 +501,24 @@ def main():
     print("最终电力面板行数:", len(power_rows))
     print("异常数:", len(anomalies))
 
-    vehicle_before, vehicle_after, (header, panel_rows) = update_final_workbook(
-        g.FINAL_XLSX, power_rows)
+    (vehicle_before, vehicle_after, old_power_header, old_power_rows,
+     (header, panel_rows)) = update_final_workbook(g.FINAL_XLSX, power_rows)
 
     problems = []
-    vdiff = verify_vehicle(vehicle_before, vehicle_after)
+    vdiff = verify_vehicle_preserved(vehicle_before, vehicle_after)
     if vdiff:
-        problems.append("车辆面板回写后发生变化 %d 处" % len(vdiff))
+        problems.append("车辆面板既有年份或新增年份处理异常 %d 处" % len(vdiff))
 
-    # 与修改前备份的车辆面板逐单元格比对
+    # 与修改前备份的车辆面板逐单元格比对（若备份仍存在）
     baseline_vehicle_diff = None
     if os.path.exists(BASELINE_FINAL):
         try:
             baseline_vehicle = _read_vehicle_sheet(BASELINE_FINAL)
-            baseline_vehicle_diff = verify_vehicle(baseline_vehicle, vehicle_after)
+            baseline_vehicle_diff = verify_vehicle_preserved(
+                baseline_vehicle, vehicle_after)
             if baseline_vehicle_diff:
-                problems.append("车辆面板与修改前备份不一致 %d 处" % len(baseline_vehicle_diff))
+                problems.append("车辆面板与修改前备份不一致 %d 处"
+                                % len(baseline_vehicle_diff))
         except Exception as e:  # noqa: BLE001
             print("基线车辆面板读取失败，跳过比对:", e)
 
@@ -502,21 +546,30 @@ def main():
     new_subs = _load_new_subtechs()
     rstat = verify_rounded(old_cats, new_subs)
 
-    pstat = verify_panel_against_baseline(BASELINE_FINAL, power_rows)
+    pstat = verify_panel_against_old(old_power_header, old_power_rows, power_rows)
+    if not pstat["skipped"] and pstat["diff"]:
+        problems.append("2010–2050 电力面板既有值发生变化 %d 处" % pstat["diff"])
 
     # ---------------- 报告 ----------------
+    hist_detail = [r for r in detail if r["Year"] < 2010]
+    hist_ok = sum(1 for r in hist_detail if r["Status"] == "ok")
+    hist_zero = sum(1 for r in hist_detail if r["Status"] == "zero_generation")
+    hist_cf = sum(1 for r in hist_detail if r["CF_Source"] == cp.CF_HISTORY_SOURCE)
+
     lines = []
     add = lines.append
-    add("电力重分类核验报告")
+    add("电力重分类与年份扩展核验报告")
     add("=" * 60)
     add("最终工作簿: %s" % g.FINAL_XLSX)
-    add("车辆面板: %d 行；电力面板: %d 行" % (len(vehicle_after) - 1, len(panel_rows)))
+    add("车辆面板: %d 行；电力面板: %d 行；年份范围 1990–2050"
+        % (len(vehicle_after) - 1, len(panel_rows)))
     add("")
 
     add("[1] 车辆面板")
-    add("  回写前后逐单元格差异: %d" % len(vdiff))
+    add("  年份扩展: 新增 1990、2005 两列（交通源表服务量为 0，BEV/PHEV 均记 0）")
+    add("  回写前后差异: %d（既有年份逐格 + 新增年份应为0）" % len(vdiff))
     if baseline_vehicle_diff is not None:
-        add("  与修改前备份逐单元格差异: %d" % len(baseline_vehicle_diff))
+        add("  与修改前备份差异: %d" % len(baseline_vehicle_diff))
     add("")
 
     add("[2] 电力面板结构与映射")
@@ -529,8 +582,10 @@ def main():
     add("")
 
     add("[3] 原始技术计算口径（对照修改前明细）")
+    add("  本次明细总行数: %d；其中 1990/2005 新增 %d 行"
+        % (len(detail), len(hist_detail)))
     if dstat["skipped"]:
-        add("  跳过：找不到基线明细 %s" % BASELINE_DETAIL)
+        add("  旧明细基线未找到，跳过逐键旧值核对；2010–2050 面板层见 [6]")
     else:
         add("  基线/本次明细行数: %d / %d" % (dstat["old_rows"], dstat["new_rows"]))
         add("  匹配键差异数: %d" % dstat["key_diff"])
@@ -569,28 +624,31 @@ def main():
         add("        差异仅可能为 ±1，属原取整规则的正常结果，未人为调整。")
     add("")
 
-    add("[6] 最终面板对照修改前面板")
+    add("[6] 最终面板对照更新前旧面板（2010–2050）")
     if pstat["skipped"]:
-        add("  跳过：找不到基线最终工作簿")
+        add("  跳过：更新前工作簿没有旧电力面板")
     else:
-        for old_cat, new_sub, diff, examples in pstat["one_to_one"]:
-            add("  %-22s -> %-22s 整数差异 %d%s"
-                % (old_cat, new_sub, diff,
-                   ("，示例 %s" % (examples[:2],)) if examples else ""))
-        for old_cat, new_sub, diff, max_abs, examples in pstat["split"]:
-            add("  %-22s -> %-22s 分别取整差异 %d（最大 |差| %d）%s"
-                % (old_cat, new_sub, diff, max_abs,
-                   ("，示例 %s" % (examples[:2],)) if examples else ""))
+        add("  逐格对比 %d 个既有年份值，差异 %d"
+            % (pstat["compared"], pstat["diff"]))
+        for ex in pstat["examples"]:
+            add("    示例: %s" % (ex,))
     add("")
 
-    add("[7] 结论")
+    add("[7] 1990/2005 新增年份")
+    add("  电力明细: %d 行（ok %d，zero_generation %d，异常 %d）"
+        % (len(hist_detail), hist_ok, hist_zero, len(anomalies)))
+    add("  历史 CF 来源（CF表(历史长表)）: %d 条" % hist_cf)
+    add("  车辆面板: 1990/2005 全部为 0（交通源表服务量为 0）")
+    add("")
+
+    add("[8] 结论")
     if problems:
         add("  未通过：")
         for p in problems:
             add("    - %s" % p)
     else:
-        add("  通过：车辆面板未变；原始技术计算口径未变；未调整分类逐格一致；")
-        add("        面板主键唯一；Subtech→tech 唯一映射；拆分项未取整合计与旧类别一致。")
+        add("  通过：车辆既有年份逐格不变、1990/2005 为 0；电力既有年份逐格一致；")
+        add("        年份扩展到 1990–2050；面板主键唯一；Subtech→tech 唯一映射。")
 
     text = "\n".join(lines)
     print(text)
