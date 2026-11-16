@@ -1,0 +1,24 @@
+# Python 缓存
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.ipynb_checkpoints/
+
+# 虚拟环境
+.venv/
+venv/
+env/
+
+# 中间数据（每次运行可重建）
+intermediate/
+
+# 临时文件与日志
+*.tmp
+~$*
+*.log
+
+# 系统文件
+.DS_Store
+Thumbs.db
+desktop.ini
