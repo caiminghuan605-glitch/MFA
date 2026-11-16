@@ -16,6 +16,7 @@
 运行：python 02_calculate_water.py
 输出：intermediate/02_用水明细.csv、02_年度总计.csv、02_校验结果.csv
       最终 Excel：铜需求分配与用水核算.xlsx（仅两张表）
+      附加面板：矿山用水年度面板.xlsx（矿山×情景×回收×贸易×年份，含经纬度）
 """
 
 from __future__ import annotations
@@ -129,6 +130,22 @@ SHEET2_COLUMNS = [
 ]
 SHEET2_HEADERS = [c[0] for c in SHEET2_COLUMNS]
 
+# --- 附加面板（独立文件，单表；不改变最终工作簿"仅两张表"的约束） ---
+PANEL_XLSX = Path(r"C:\Users\22965\OneDrive\桌面\MFA\Output\矿山用水年度面板.xlsx")
+PANEL_SHEET = "矿山年度面板"
+PANEL_COLUMNS = [
+    ("矿山项目名称", 28, "text"), ("需求情景", 12, "text"), ("回收情景", 11, "text"),
+    ("贸易情景", 11, "text"), ("国家", 18, "text"), ("经度", 10, "num4"),
+    ("纬度", 10, "num4"), ("年份", 7, "year"), ("工艺路线", 9, "text"),
+    ("产物名称", 10, "text"), ("当年参考铜产量_tCu", 18, "tcu"),
+    ("分配铜量_tCu", 16, "tcu"), ("产物实物量_t", 16, "tprod"),
+    ("用水量_m3", 18, "m3"), ("用水量_百万m3", 14, "mm3"),
+    ("地区", 10, "text"), ("矿山ID", 9, "text"), ("情景ID", 22, "text"),
+]
+PANEL_HEADERS = [c[0] for c in PANEL_COLUMNS]
+COL_LON = "经度"
+COL_LAT = "纬度"
+
 
 # %% Chunk 2：读取分配结果及系数
 # 功能：读入程序一长表与原始系数表；校验主键、系数键与数值合法性。
@@ -201,6 +218,42 @@ def load_coefficients() -> tuple[pd.DataFrame, pd.DataFrame]:
     if long.duplicated(["地区", COL_ROUTE]).any():
         raise ValueError("用水系数 地区×路线 键重复。")
     return raw, long
+
+
+def load_mine_coords() -> pd.DataFrame:
+    """回填矿山经纬度：按与程序一相同的源行号规则重建矿山ID，保证一一对应。"""
+    mp = read_excel_robust(INPUT_XLSX, "Mine Production")
+    mp.columns = [str(c).strip() for c in mp.columns]
+    for c in [COL_NAME, COL_COUNTRY, COL_LON, COL_LAT]:
+        if c not in mp.columns:
+            raise ValueError(f"Mine Production 缺少字段：{c}")
+    src = pd.DataFrame({
+        "源行号": np.arange(2, len(mp) + 2),
+        COL_NAME: mp[COL_NAME].to_numpy(),
+        COL_COUNTRY: mp[COL_COUNTRY].to_numpy(),
+        COL_LON: pd.to_numeric(mp[COL_LON], errors="coerce").to_numpy(),
+        COL_LAT: pd.to_numeric(mp[COL_LAT], errors="coerce").to_numpy(),
+    })
+    # 与程序一一致：先固定源行号，再剔除全空行
+    keep = ~mp.isna().all(axis=1).to_numpy()
+    src = src[keep].copy()
+    src[COL_MINE_ID] = [f"MP{r:04d}" for r in src["源行号"]]
+    if src[COL_MINE_ID].duplicated().any():
+        raise ValueError("经纬度回填时矿山ID重复。")
+    return src[[COL_MINE_ID, COL_LON, COL_LAT]]
+
+
+def build_panel(df: pd.DataFrame, coords: pd.DataFrame) -> pd.DataFrame:
+    """构造 矿山×情景×回收×贸易×年份 的年度面板（含经纬度）。"""
+    panel = df.merge(coords, on=COL_MINE_ID, how="left", validate="many_to_one")
+    is_gap = panel[COL_MINE_ID].astype(str).eq("GAP000")
+    if panel.loc[~is_gap, [COL_LON, COL_LAT]].isna().any().any():
+        bad = panel.loc[~is_gap & panel[COL_LON].isna(), COL_MINE_ID].head(5).tolist()
+        raise ValueError(f"部分矿山未回填到经纬度（前 5 个）：{bad}")
+    real = panel[~is_gap]
+    if not (real[COL_LON].between(-180, 180).all() and real[COL_LAT].between(-90, 90).all()):
+        raise ValueError("经纬度超出合理范围，请检查 Mine Production。")
+    return panel
 
 
 # %% Chunk 3：地区、路线和产品匹配
@@ -435,6 +488,7 @@ def make_formats(wb: xlsxwriter.Workbook) -> dict:
         "tprod": wb.add_format({"num_format": "#,##0.000"}),
         "m3": wb.add_format({"num_format": "#,##0.000"}),
         "mm3": wb.add_format({"num_format": "0.000000"}),
+        "num4": wb.add_format({"num_format": "0.0000"}),
         "text": None,
     }
 
@@ -472,9 +526,22 @@ class StreamSheet:
         self.row = r
 
 
+def ensure_writable(path: Path) -> None:
+    """写前检查目标是否被 Excel/OneDrive 占用，给出可操作提示。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        try:
+            with open(path, "a+b"):
+                pass
+        except PermissionError as exc:
+            raise RuntimeError(
+                f"{path.name} 正被其他程序占用（通常是 Excel 打开着），请关闭后重跑本程序。"
+            ) from exc
+
+
 def write_excel(alloc: pd.DataFrame, water: pd.DataFrame, totals: pd.DataFrame) -> None:
     """重写最终工作簿：仅两张表，表 1 由分配结果原样重建，表 2 = 明细 + 年度总计。"""
-    OUTPUT_XLSX.parent.mkdir(parents=True, exist_ok=True)
+    ensure_writable(OUTPUT_XLSX)
     wb = xlsxwriter.Workbook(str(OUTPUT_XLSX), {"constant_memory": True})
     fmts = make_formats(wb)
 
@@ -495,6 +562,20 @@ def write_excel(alloc: pd.DataFrame, water: pd.DataFrame, totals: pd.DataFrame) 
         sh2.write_values(rec)
     if sh2.row != n2:
         raise RuntimeError(f"表 2 行数不符：{sh2.row} vs {n2}")
+    wb.close()
+
+
+def write_panel(panel: pd.DataFrame) -> None:
+    """生成附加的矿山年度面板（独立文件，单表，含经纬度）。"""
+    ensure_writable(PANEL_XLSX)
+    wb = xlsxwriter.Workbook(str(PANEL_XLSX), {"constant_memory": True})
+    fmts = make_formats(wb)
+    n = len(panel)
+    sh = StreamSheet(wb, PANEL_SHEET, PANEL_COLUMNS, fmts, n)
+    for rec in panel[PANEL_HEADERS].itertuples(index=False, name=None):
+        sh.write_values(rec)
+    if sh.row != n:
+        raise RuntimeError(f"面板行数不符：{sh.row} vs {n}")
     wb.close()
 
 
@@ -533,6 +614,11 @@ def main() -> None:
     totals = build_totals(df)
     checks = validate_all(df, totals, alloc, q_rel)
 
+    # 附加面板：回填经纬度并校验
+    coords = load_mine_coords()
+    panel = build_panel(df, coords)
+    print(f"附加面板 {len(panel)} 行（矿山×情景×回收×贸易×年份，含经纬度）")
+
     # 明细与总计写 CSV（先写，保证可复核）
     out_detail = df[SHEET2_HEADERS]
     out_detail.to_csv(WATER_DETAIL_CSV, index=False, encoding="utf-8-sig")
@@ -546,6 +632,10 @@ def main() -> None:
          "结果": "通过", "说明": "由程序一中间结果重建"},
         {"检查项": "表 2 行数（明细+总计）", "结果值": len(df) + len(totals), "容差": "",
          "结果": "通过", "说明": ""},
+        {"检查项": "附加面板行数", "结果值": len(panel), "容差": "=272196",
+         "结果": "通过", "说明": "单表：矿山年度面板"},
+        {"检查项": "附加面板经纬度缺失", "结果值": int(panel[COL_LON].isna().sum()), "容差": "0",
+         "结果": "通过", "说明": "全部由 Mine Production 回填"},
         {"检查项": "输入 数据.xlsx sha256（运行前）", "结果值": hash_in, "容差": "",
          "结果": "通过", "说明": ""},
     ])
@@ -555,7 +645,8 @@ def main() -> None:
     for _, r in check_df.iterrows():
         print(f"  [{r['结果']}] {r['检查项']}: {r['结果值']}")
 
-    # Chunk 7（Excel）
+    # Chunk 7（先写独立面板，避免最终 Excel 被占用时面板也一起失败）
+    write_panel(panel)
     write_excel(alloc, df, totals)
 
     # 复核最终工作簿：只有两张表，行数正确
@@ -575,6 +666,16 @@ def main() -> None:
     finally:
         wb.close()
 
+    wb2 = openpyxl.load_workbook(PANEL_XLSX, read_only=True)
+    try:
+        if wb2.sheetnames != [PANEL_SHEET]:
+            raise RuntimeError(f"面板工作表不符合要求：{wb2.sheetnames}")
+        dp = wb2[PANEL_SHEET].max_row - 1
+        if dp != len(panel):
+            raise RuntimeError(f"面板行数复核失败：{dp} vs {len(panel)}")
+    finally:
+        wb2.close()
+
     if sha256_file(INPUT_XLSX) != hash_in:
         raise RuntimeError("输入 数据.xlsx 在运行期间被修改，请复核。")
 
@@ -583,6 +684,7 @@ def main() -> None:
     print(f"  年度总计 {WATER_TOTAL_CSV}")
     print(f"  校验结果 {CHECK_CSV}")
     print(f"  最终 Excel {OUTPUT_XLSX}（2 张表：{names}）")
+    print(f"  附加面板 {PANEL_XLSX}（1 张表：{PANEL_SHEET}）")
     print(f"  全情景全年度用水量合计 {df[COL_WATER].sum() / 1e6:,.1f} 百万 m³")
 
 
