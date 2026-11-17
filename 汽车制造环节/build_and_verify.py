@@ -124,8 +124,9 @@ def _read_power_sheet(path):
 def _extend_vehicle_sheet(ws):
     """把车辆面板年份扩展到 g.VEHICLE_PANEL_YEARS。
 
-    已有年份逐格保留；新增的 1990、2005 两年，交通源表服务量为 0，
-    因此 BEV/PHEV 均记 0。返回是否发生了扩展。
+    已有年份逐格保留；新增的 1990、2005 两年，交通源表服务量为 0，记 0；
+    新增的 2021 为基准年节点（原面板止于 2020），按“2020 持平”取 2020 年的值。
+    返回是否发生了扩展。
     """
     header = [c.value for c in ws[1]]
     if header == VEHICLE_FIELDS:
@@ -139,7 +140,12 @@ def _extend_vehicle_sheet(ws):
     for r in old_rows:
         row = [r[old_idx[f]] for f in VEHICLE_KEY_FIELDS]
         for y in g.VEHICLE_PANEL_YEARS:
-            row.append(r[old_idx[y]] if y in old_idx else 0)
+            if y in old_idx:
+                row.append(r[old_idx[y]])
+            elif y == 2021 and 2020 in old_idx:
+                row.append(r[old_idx[2020]])
+            else:
+                row.append(0)
         new_rows.append(row)
     ws.delete_rows(1, ws.max_row)
     ws.append(VEHICLE_FIELDS)
@@ -194,7 +200,7 @@ def update_final_workbook(path, power_rows):
 # 核验
 # --------------------------------------------------------------------------- #
 def verify_vehicle_preserved(before, after):
-    """核对车辆面板：既有年份逐单元格不变；新增 1990/2005 两列为 0。"""
+    """核对车辆面板：既有年份逐单元格不变；新增 1990/2005 两列为 0，2021 等于 2020。"""
     diffs = []
     bh = list(before[0])
     ah = list(after[0])
@@ -208,11 +214,11 @@ def verify_vehicle_preserved(before, after):
     old_years = [y for y in bh if isinstance(y, int)]
     new_years = [y for y in ah if isinstance(y, int)]
     added = [y for y in new_years if y not in old_years]
-    missing_new = [y for y in (1990, 2005) if y not in new_years]
+    missing_new = [y for y in (1990, 2005, 2021) if y not in new_years]
     if missing_new:
-        diffs.append(("缺少新增年份", missing_new, [1990, 2005]))
-    if added and set(added) != {1990, 2005}:
-        diffs.append(("新增年份", added, [1990, 2005]))
+        diffs.append(("缺少新增年份", missing_new, [1990, 2005, 2021]))
+    if added and set(added) != {1990, 2005, 2021}:
+        diffs.append(("新增年份", added, [1990, 2005, 2021]))
 
     bi = {h: i for i, h in enumerate(bh)}
     ai = {h: i for i, h in enumerate(ah)}
@@ -226,6 +232,8 @@ def verify_vehicle_preserved(before, after):
         for y in (1990, 2005):
             if y in ai and ra[ai[y]] not in (0, None):
                 diffs.append(("行%d 年%d 应为0" % (i + 2, y), ra[ai[y]], 0))
+        if 2021 in ai and 2020 in bi and ra[ai[2021]] != rb[bi[2020]]:
+            diffs.append(("行%d 年2021应等于2020" % (i + 2), ra[ai[2021]], rb[bi[2020]]))
     return diffs
 
 
