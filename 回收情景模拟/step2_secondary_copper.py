@@ -2020,6 +2020,10 @@ def main(argv=None):
                       ("回收率", cfg["paths"]["recycling_xlsx"]),
                       ("贸易矩阵", cfg["paths"]["trade_xlsx"])):
         p = Path(path)
+        if not p.exists():
+            # 仅核对类输入（如 铜存量.xlsx）可能不存在：记录 missing，不参与哈希
+            run_info["hashes"][key] = {"path": str(path), "source": "missing", "sha256": None}
+            continue
         try:
             digest = sha256_of(p)
             src = "original"
